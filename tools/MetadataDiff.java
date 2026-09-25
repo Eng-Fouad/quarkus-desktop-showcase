@@ -1,0 +1,752 @@
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Executable;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+/**
+ * Diffs the reachability metadata recorded by the GraalVM tracing agent (JVM run of the showcase, see
+ * {@code tools/Snapshot.java --trace} and {@code tools/Cycle.java --trace}) against what quarkus-desktop registers for a
+ * platform : the common lists and the lists of that platform of
+ * {@code io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources} and
+ * {@code io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources}, read from the deployment jars installed in
+ * the local Maven repository (so the installed snapshot is compared, not the sources).
+ * <p>
+ * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] [--version=999-SNAPSHOT]
+ * [--quarkus-version=3.40.0]
+ * <p>
+ * Universe : the classes and resources of the JDK modules java.desktop, java.datatransfer, jdk.unsupported.desktop and
+ * jdk.accessibility ({@code jrt:/} of the JDK running the tool) and the packages of these modules. List entries are
+ * class names, package names (covering their classes and sub packages), {@code "fqcn#name(paramType,...)"} methods and
+ * {@code "fqcn#field"} fields, per the naming convention {@code [WINDOWS_|LINUX_|MAC_]<KIND>} of static String[] fields.
+ * <p>
+ * Output (Markdown, on stdout) : the agent-recorded accesses (JNI, reflection, resources, resource bundles,
+ * serialization, dynamic proxies) that the lists do not cover, grouped by kind ; names also found in the constant pool
+ * of quarkus-awt's {@code AwtProcessor} (registered by io.quarkus:quarkus-awt, heuristic) ; platform entries not used by
+ * the run ; and list entries that do not exist in this JDK (stale, typos, or another platform).
+ */
+public class MetadataDiff {
+
+    static final Path M2 = Path.of(System.getProperty("user.home"), ".m2", "repository");
+    static final List<String> MODULES = List.of("java.desktop", "java.datatransfer", "jdk.unsupported.desktop",
+            "jdk.accessibility");
+    /** Packages of the desktop modules on every platform (for traces recorded on another operating system). */
+    static final List<String> DESKTOP_PACKAGES = List.of("java.awt", "javax.swing", "sun.awt", "sun.java2d", "sun.font",
+            "sun.print", "javax.print", "javax.imageio", "com.sun.imageio", "sun.swing", "com.sun.java.swing", "javax.sound",
+            "com.sun.media.sound", "java.beans", "com.sun.beans", "sun.datatransfer", "javax.accessibility",
+            "com.sun.java.accessibility", "com.sun.accessibility", "jdk.swing.interop", "java.applet", "sun.lwawt",
+            "com.apple.eawt", "com.apple.laf");
+    static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
+            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_CLASSES",
+            "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES", "RESOURCE_GLOBS",
+            "SERVICE_PROVIDERS");
+
+    public static void main(String[] args) throws Exception {
+        if (args.length == 0) {
+            System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] "
+                    + "[--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
+            System.exit(2);
+        }
+        Path metadata = Path.of(args[0]);
+        String platform = currentPlatform();
+        boolean awtOnly = false;
+        String version = "999-SNAPSHOT";
+        String quarkusVersion = quarkusVersion();
+        for (int i = 1; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equals("--awt-only")) {
+                awtOnly = true;
+            } else if (arg.startsWith("--version=")) {
+                version = arg.substring("--version=".length());
+            } else if (arg.startsWith("--quarkus-version=")) {
+                quarkusVersion = arg.substring("--quarkus-version=".length());
+            } else {
+                platform = arg.toLowerCase(Locale.ROOT).startsWith("win") ? "WINDOWS"
+                        : arg.toLowerCase(Locale.ROOT).startsWith("mac") ? "MAC" : "LINUX";
+            }
+        }
+        boolean samePlatform = platform.equals(currentPlatform());
+
+        Universe universe = Universe.load();
+        Registrations reg = new Registrations(universe);
+        List<String> sources = new ArrayList<>();
+        for (String[] extension : extensions(awtOnly)) {
+            Path jar = M2.resolve("io/quarkiverse/desktop/" + extension[0] + "/" + version + "/" + extension[0] + "-"
+                    + version + ".jar");
+            if (!Files.exists(jar)) {
+                sources.add(jar + " : NOT FOUND (install quarkus-desktop)");
+                continue;
+            }
+            Map<String, String[]> lists = readLists(jar, extension[1]);
+            sources.add(jar + " (" + Files.getLastModifiedTime(jar) + ") : " + lists.size() + " lists");
+            reg.add(extension[2], lists, platform);
+        }
+        Path awtDeployment = M2.resolve("io/quarkus/quarkus-awt-deployment/" + quarkusVersion + "/quarkus-awt-deployment-"
+                + quarkusVersion + ".jar");
+        Set<String> quarkusAwt = new TreeSet<>();
+        List<Pattern> quarkusAwtGlobs = new ArrayList<>();
+        if (Files.exists(awtDeployment)) {
+            for (String constant : stringConstants(awtDeployment, "io/quarkus/awt/deployment/AwtProcessor.class")) {
+                if (universe.isClassOrPackage(constant) || isDesktopName(constant)) {
+                    quarkusAwt.add(constant);
+                } else if ((constant.contains("*") || constant.contains("/")) && !constant.contains(" ")) {
+                    quarkusAwtGlobs.add(globToRegex(constant));
+                }
+            }
+            sources.add(awtDeployment + " : " + quarkusAwt.size() + " class names, " + quarkusAwtGlobs.size() + " globs");
+        } else {
+            sources.add(awtDeployment + " : NOT FOUND");
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> md = (Map<String, Object>) new Compare.JsonParser(Files.readString(metadata)).parse();
+
+        Map<String, String> missingJni = new TreeMap<>();
+        Map<String, String> missingReflection = new TreeMap<>();
+        Map<String, String> byQuarkusAwt = new TreeMap<>();
+        Set<String> serialization = new TreeSet<>();
+        Set<String> proxies = new TreeSet<>();
+        Set<String> arrays = new TreeSet<>();
+        Map<String, String> otherJni = new TreeMap<>();
+        Set<String> usedJni = new HashSet<>();
+        Set<String> usedReflection = new HashSet<>();
+
+        // resource bundles looked up by the run : their classes and properties files are reported as bundles
+        Set<String> agentBundles = new TreeSet<>();
+        for (Object o : (List<?>) md.getOrDefault("resources", List.of())) {
+            if (map(o).get("bundle") != null) {
+                agentBundles.add(String.valueOf(map(o).get("bundle")));
+            }
+        }
+
+        List<Map<String, Object>> entries = new ArrayList<>();
+        for (Object o : (List<?>) md.getOrDefault("reflection", List.of())) {
+            entries.add(map(o));
+        }
+        // older agents : a separate "jni" section
+        for (Object o : (List<?>) md.getOrDefault("jni", List.of())) {
+            Map<String, Object> entry = new LinkedHashMap<>(map(o));
+            entry.put("jniAccessible", true);
+            entries.add(entry);
+        }
+        for (Map<String, Object> entry : entries) {
+            Object typeValue = entry.get("type");
+            if (typeValue instanceof Map<?, ?> proxy && proxy.get("proxy") instanceof List<?> interfaces) {
+                if (interfaces.stream().map(String::valueOf).anyMatch(n -> universe.isDesktop(n))) {
+                    proxies.add(String.valueOf(interfaces));
+                }
+                continue;
+            }
+            if (!(typeValue instanceof String type)) {
+                continue;
+            }
+            boolean jni = Boolean.TRUE.equals(entry.get("jniAccessible"));
+            String component = type.replace("[]", "");
+            boolean desktop = universe.isDesktop(component);
+            if (Boolean.TRUE.equals(entry.get("serializable")) && desktop) {
+                serialization.add(type);
+            }
+            if (!desktop) {
+                if (jni && !type.startsWith("sun.launcher.") && (type.startsWith("java.") || type.startsWith("javax.")
+                        || type.startsWith("jdk.") || type.startsWith("sun.") || type.startsWith("com.sun."))) {
+                    otherJni.put(type, members(entry));
+                }
+                continue;
+            }
+            if (type.endsWith("[]")) {
+                arrays.add(type + (jni ? " (JNI)" : ""));
+                continue;
+            }
+            List<String> missing = jni ? reg.missingJni(type, entry) : reg.missingReflection(type, entry);
+            (jni ? usedJni : usedReflection).add(type);
+            if (missing.isEmpty() || (!jni && missing.equals(List.of("type")) && isBundle(type, agentBundles))) {
+                continue;
+            }
+            String description = String.join(" ", missing);
+            if (quarkusAwt.contains(type) || quarkusAwt.stream().anyMatch(p -> type.startsWith(p + "."))) {
+                byQuarkusAwt.put((jni ? "JNI " : "reflection ") + type, description);
+            } else if (jni) {
+                missingJni.put(type, description);
+            } else {
+                missingReflection.put(type, description);
+            }
+        }
+
+        Set<String> missingResources = new TreeSet<>();
+        Set<String> missingBundles = new TreeSet<>();
+        for (Object o : (List<?>) md.getOrDefault("resources", List.of())) {
+            Map<String, Object> entry = map(o);
+            if (entry.get("bundle") != null) {
+                String bundle = String.valueOf(entry.get("bundle"));
+                if (universe.isDesktop(bundle) && !reg.bundles.contains(bundle)) {
+                    missingBundles.add(bundle + (entry.get("module") != null ? " (module " + entry.get("module") + ")" : ""));
+                }
+                continue;
+            }
+            String glob = String.valueOf(entry.get("glob"));
+            String module = entry.get("module") == null ? null : String.valueOf(entry.get("module"));
+            boolean desktop = (module != null && MODULES.contains(module)) || universe.resources.contains(glob);
+            if (!desktop || glob.endsWith(".class")) {
+                continue;
+            }
+            if (reg.resourceCovered(glob) || (glob.endsWith(".properties")
+                    && isBundle(glob.substring(0, glob.length() - ".properties".length()).replace('/', '.'), agentBundles))) {
+                continue;
+            }
+            if (quarkusAwtGlobs.stream().anyMatch(p -> p.matcher(glob).matches())) {
+                byQuarkusAwt.put("resource " + glob, "");
+                continue;
+            }
+            missingResources.add(glob + (module != null ? " (module " + module + ")" : ""));
+        }
+
+        System.out.println("# Tracing agent metadata vs quarkus-desktop (" + platform + (awtOnly ? ", awt lists only" : "")
+                + ")");
+        System.out.println();
+        System.out.println("- metadata: " + metadata);
+        sources.forEach(s -> System.out.println("- lists: " + s));
+        System.out.println("- JDK: " + System.getProperty("java.home") + " (" + Runtime.version() + "), universe: "
+                + universe.classes.size() + " classes, " + universe.resources.size() + " resources of " + MODULES);
+        section("JNI accesses not registered", missingJni);
+        section("Reflection accesses not registered", missingReflection);
+        list("Resources not included", missingResources);
+        list("Resource bundles not included", missingBundles);
+        list("Serialization of desktop types (no list kind : register in the extension code)", serialization);
+        list("Dynamic proxies with desktop interfaces (no list kind : register in the extension code)", proxies);
+        list("Array types of desktop classes (reflection on array classes, usually harmless)", arrays);
+        section("Not in the lists but named by io.quarkus:quarkus-awt (heuristic : constant pool of AwtProcessor)",
+                byQuarkusAwt);
+        section("JNI accesses to JDK types outside the desktop modules (GraalVM or Quarkus may register them : verify with "
+                + "a native run)", otherJni);
+
+        for (String kind : List.of("JNI_RUNTIME_ACCESS_CLASSES", "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS")) {
+            Set<String> unused = new TreeSet<>();
+            for (String name : reg.platformEntries(kind)) {
+                Set<String> used = kind.startsWith("JNI") ? usedJni : usedReflection;
+                if (universe.classes.containsKey(name) && !used.contains(name)) {
+                    unused.add(name);
+                }
+            }
+            list(platform + "_" + kind + " entries not used in this run (candidates to verify, not to remove blindly)",
+                    unused);
+        }
+        Set<String> stale = reg.stale(samePlatform);
+        list("Registered names that do not exist in this JDK (stale, typo, or another platform"
+                + (samePlatform ? "" : " : " + platform + " lists not checked, the JDK is " + currentPlatform()) + ")",
+                stale);
+    }
+
+    static List<String[]> extensions(boolean awtOnly) {
+        List<String[]> list = new ArrayList<>();
+        list.add(new String[] { "quarkus-desktop-awt-deployment", "io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources",
+                "awt" });
+        if (!awtOnly) {
+            list.add(new String[] { "quarkus-desktop-swing-deployment",
+                    "io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources", "swing" });
+        }
+        return list;
+    }
+
+    /**
+     * Every static String[] field of {@code className}, read from {@code jar} in an isolated class loader.
+     */
+    static Map<String, String[]> readLists(Path jar, String className) throws Exception {
+        Map<String, String[]> lists = new TreeMap<>();
+        try (URLClassLoader cl = new URLClassLoader(new URL[] { jar.toUri().toURL() }, ClassLoader.getPlatformClassLoader())) {
+            Class<?> c = Class.forName(className, true, cl);
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) && f.getType() == String[].class) {
+                    f.setAccessible(true);
+                    String[] values = (String[]) f.get(null);
+                    lists.put(f.getName(), values == null ? new String[0] : values);
+                }
+            }
+        }
+        return lists;
+    }
+
+    /**
+     * What the lists of one platform register.
+     */
+    static final class Registrations {
+        final Universe universe;
+        final Set<String> reflectiveClasses = new HashSet<>();
+        final Set<String> reflectiveConstructors = new HashSet<>();
+        final Set<String> reflectiveMethods = new HashSet<>();
+        final Set<String> reflectiveMethodOwners = new HashSet<>();
+        final Set<String> providers = new HashSet<>();
+        final Set<String> jniClasses = new HashSet<>();
+        final Set<String> jniMembers = new HashSet<>();
+        final Set<String> jniMemberOwners = new HashSet<>();
+        final Set<String> bundles = new HashSet<>();
+        final List<Pattern> globs = new ArrayList<>();
+        final Map<String, List<String>> platformLists = new TreeMap<>();
+        // list name (source.FIELD) -> entries, for the stale check
+        final Map<String, String[]> all = new TreeMap<>();
+
+        Registrations(Universe universe) {
+            this.universe = universe;
+        }
+
+        void add(String source, Map<String, String[]> lists, String platform) {
+            lists.forEach((name, values) -> all.put(source + "." + name, values));
+            for (String kind : KINDS) {
+                List<String> values = new ArrayList<>();
+                values.addAll(List.of(lists.getOrDefault(kind, new String[0])));
+                List<String> platformValues = List.of(lists.getOrDefault(platform + "_" + kind, new String[0]));
+                values.addAll(platformValues);
+                platformLists.computeIfAbsent(kind, k -> new ArrayList<>()).addAll(platformValues);
+                for (String value : values) {
+                    String v = value.replace(" ", "");
+                    switch (kind) {
+                        case "REFLECTIVE_CLASSES" -> reflectiveClasses.add(v);
+                        case "REFLECTIVE_CONSTRUCTORS" -> reflectiveConstructors.add(v);
+                        case "REFLECTIVE_METHODS" -> {
+                            reflectiveMethods.add(v);
+                            reflectiveMethodOwners.add(owner(v));
+                        }
+                        case "SERVICE_PROVIDERS" -> providers.add(v);
+                        case "JNI_RUNTIME_ACCESS_CLASSES" -> jniClasses.add(v);
+                        case "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS" -> {
+                            jniMembers.add(v);
+                            jniMemberOwners.add(owner(v));
+                        }
+                        case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
+                        case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
+                        default -> {
+                        }
+                    }
+                }
+            }
+        }
+
+        List<String> platformEntries(String kind) {
+            return platformLists.getOrDefault(kind, List.of());
+        }
+
+        /**
+         * {@code type} is in {@code set}, or in a package of {@code set}.
+         */
+        boolean in(Set<String> set, String type) {
+            if (set.contains(type)) {
+                return true;
+            }
+            for (String pkg = packageOf(type); pkg != null; pkg = packageOf(pkg)) {
+                if (set.contains(pkg) && universe.packages.contains(pkg)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        List<String> missingReflection(String type, Map<String, Object> entry) {
+            List<String> missing = new ArrayList<>();
+            boolean all = in(reflectiveClasses, type);
+            boolean constructors = all || in(reflectiveConstructors, type) || in(providers, type);
+            boolean methods = all || in(providers, type);
+            boolean typeRegistered = constructors || methods || reflectiveMethodOwners.contains(type);
+            if (!typeRegistered) {
+                missing.add("type");
+            }
+            for (Map<String, Object> m : list(entry.get("methods"))) {
+                String name = String.valueOf(m.get("name"));
+                String signature = type + "#" + name + "(" + String.join(",", strings(m.get("parameterTypes"))) + ")";
+                boolean covered = name.equals("<init>") ? constructors || reflectiveMethods.contains(signature)
+                        : methods || reflectiveMethods.contains(signature);
+                if (!covered) {
+                    missing.add("method " + signature.substring(type.length()));
+                }
+            }
+            for (Map<String, Object> f : list(entry.get("fields"))) {
+                if (!all) {
+                    missing.add("field #" + f.get("name"));
+                }
+            }
+            for (String flag : entry.keySet()) {
+                if (flag.startsWith("all") && Boolean.TRUE.equals(entry.get(flag))) {
+                    boolean covered = flag.contains("Constructors") ? constructors : flag.contains("Methods") ? methods : all;
+                    if (!covered) {
+                        missing.add(flag);
+                    }
+                }
+            }
+            if (Boolean.TRUE.equals(entry.get("unsafeAllocated")) && !all) {
+                missing.add("unsafeAllocated");
+            }
+            return missing;
+        }
+
+        List<String> missingJni(String type, Map<String, Object> entry) {
+            List<String> missing = new ArrayList<>();
+            boolean all = in(jniClasses, type);
+            if (!all && !jniMemberOwners.contains(type)) {
+                missing.add("type");
+            }
+            for (Map<String, Object> m : list(entry.get("methods"))) {
+                String signature = type + "#" + m.get("name") + "(" + String.join(",", strings(m.get("parameterTypes")))
+                        + ")";
+                if (!all && !jniMembers.contains(signature)) {
+                    missing.add("method " + signature.substring(type.length()));
+                }
+            }
+            for (Map<String, Object> f : list(entry.get("fields"))) {
+                String signature = type + "#" + f.get("name");
+                if (!all && !jniMembers.contains(signature)) {
+                    missing.add("field " + signature.substring(type.length()));
+                }
+            }
+            return missing;
+        }
+
+        boolean resourceCovered(String path) {
+            if (globs.stream().anyMatch(p -> p.matcher(path).matches())) {
+                return true;
+            }
+            if (path.endsWith(".properties")) {
+                String base = path.substring(0, path.length() - ".properties".length()).replace('/', '.');
+                for (String bundle : bundles) {
+                    if (base.equals(bundle) || (base.startsWith(bundle + "_") && base.indexOf('.', bundle.length()) < 0)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Entries naming classes, packages or members that do not exist in the JDK running the tool.
+         */
+        Set<String> stale(boolean checkPlatformLists) {
+            Set<String> stale = new TreeSet<>();
+            all.forEach((list, values) -> {
+                String field = list.substring(list.indexOf('.') + 1);
+                boolean platformList = field.startsWith("WINDOWS_") || field.startsWith("LINUX_") || field.startsWith("MAC_");
+                if (platformList && (!checkPlatformLists || !field.startsWith(currentPlatform() + "_"))) {
+                    return;
+                }
+                String kind = platformList ? field.substring(field.indexOf('_') + 1) : field;
+                if (kind.equals("RESOURCE_GLOBS")) {
+                    for (String glob : values) {
+                        Pattern pattern = globToRegex(glob);
+                        if (!glob.startsWith("META-INF") && universe.resources.stream().noneMatch(r -> pattern.matcher(r).matches())) {
+                            stale.add(list + ": " + glob + " (matches no resource of the desktop modules)");
+                        }
+                    }
+                    return;
+                }
+                for (String value : values) {
+                    String v = value.replace(" ", "");
+                    String problem = switch (kind) {
+                        case "RESOURCE_BUNDLES" -> {
+                            String bundle = v.contains(":") ? v.substring(v.indexOf(':') + 1) : v;
+                            yield universe.classes.containsKey(bundle)
+                                    || universe.resources.contains(bundle.replace('.', '/') + ".properties") ? null
+                                            : "no such bundle";
+                        }
+                        case "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_METHODS" -> universe.checkMethod(v);
+                        case "JNI_RUNTIME_ACCESS_FIELDS" -> universe.checkField(v);
+                        default -> universe.isClassOrPackage(v) ? null : "no such class or package";
+                    };
+                    if (problem != null) {
+                        stale.add(list + ": " + value + " (" + problem + ")");
+                    }
+                }
+            });
+            return stale;
+        }
+    }
+
+    /**
+     * The classes and resources of the desktop modules of the JDK running the tool.
+     */
+    static final class Universe {
+        final Map<String, String> classes = new TreeMap<>(); // binary name -> module
+        final Set<String> resources = new TreeSet<>();
+        final Set<String> packages = new TreeSet<>();
+
+        static Universe load() throws IOException {
+            Universe u = new Universe();
+            FileSystem jrt = FileSystems.getFileSystem(URI.create("jrt:/"));
+            for (String module : MODULES) {
+                Path root = jrt.getPath("/modules", module);
+                if (!Files.exists(root)) {
+                    continue;
+                }
+                try (Stream<Path> files = Files.walk(root)) {
+                    for (Path p : files.filter(Files::isRegularFile).toList()) {
+                        String name = root.relativize(p).toString().replace('\\', '/');
+                        if (name.endsWith(".class")) {
+                            if (!name.equals("module-info.class")) {
+                                String binary = name.substring(0, name.length() - 6).replace('/', '.');
+                                u.classes.put(binary, module);
+                                for (String pkg = packageOf(binary); pkg != null; pkg = packageOf(pkg)) {
+                                    u.packages.add(pkg);
+                                }
+                            }
+                        } else {
+                            u.resources.add(name);
+                        }
+                    }
+                }
+            }
+            return u;
+        }
+
+        boolean isClassOrPackage(String name) {
+            return classes.containsKey(name) || packages.contains(name);
+        }
+
+        /**
+         * A class of the desktop modules (or of their packages on another platform).
+         */
+        boolean isDesktop(String name) {
+            return classes.containsKey(name) || isDesktopName(name);
+        }
+
+        String checkMethod(String entry) {
+            Matcher m = Pattern.compile("([^#]+)#([^(]+)\\((.*)\\)").matcher(entry);
+            if (!m.matches()) {
+                return "not fqcn#name(paramType,...)";
+            }
+            Class<?> c = load(m.group(1));
+            if (c == null) {
+                return "no such class";
+            }
+            List<String> params = m.group(3).isEmpty() ? List.of() : List.of(m.group(3).split(","));
+            List<Executable> candidates = new ArrayList<>();
+            try {
+                if (m.group(2).equals("<init>")) {
+                    candidates.addAll(Arrays.asList(c.getDeclaredConstructors()));
+                } else {
+                    Arrays.stream(c.getDeclaredMethods()).filter(x -> x.getName().equals(m.group(2))).forEach(candidates::add);
+                }
+            } catch (Throwable t) {
+                return null; // cannot check (linkage)
+            }
+            for (Executable e : candidates) {
+                List<String> types = Arrays.stream(e.getParameterTypes()).map(MetadataDiff::typeName).toList();
+                if (types.equals(params)) {
+                    return null;
+                }
+            }
+            return candidates.isEmpty() ? "no such " + (m.group(2).equals("<init>") ? "constructor" : "method")
+                    : "no such parameter types, found " + candidates.stream().map(e -> Arrays.stream(e.getParameterTypes())
+                            .map(MetadataDiff::typeName).toList().toString()).toList();
+        }
+
+        String checkField(String entry) {
+            int hash = entry.indexOf('#');
+            if (hash < 0) {
+                return "not fqcn#field";
+            }
+            Class<?> c = load(entry.substring(0, hash));
+            if (c == null) {
+                return "no such class";
+            }
+            try {
+                c.getDeclaredField(entry.substring(hash + 1));
+                return null;
+            } catch (NoSuchFieldException e) {
+                return "no such field";
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+
+        static Class<?> load(String name) {
+            try {
+                return Class.forName(name, false, ClassLoader.getPlatformClassLoader());
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+    }
+
+    static String typeName(Class<?> c) {
+        return c.isArray() ? typeName(c.getComponentType()) + "[]" : c.getName();
+    }
+
+    /**
+     * {@code name} is one of {@code bundles}, or a localized variant ({@code <bundle>_<locale>}).
+     */
+    static boolean isBundle(String name, Set<String> bundles) {
+        for (String bundle : bundles) {
+            if (name.equals(bundle) || (name.startsWith(bundle + "_") && name.indexOf('.', bundle.length()) < 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isDesktopName(String name) {
+        for (String pkg : DESKTOP_PACKAGES) {
+            if (name.equals(pkg) || name.startsWith(pkg + ".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String packageOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? null : name.substring(0, dot);
+    }
+
+    static String owner(String member) {
+        int hash = member.indexOf('#');
+        return hash < 0 ? member : member.substring(0, hash);
+    }
+
+    /**
+     * The String constants of a class file (constant pool), without a bytecode library.
+     */
+    static List<String> stringConstants(Path jar, String entry) throws IOException {
+        List<String> result = new ArrayList<>();
+        try (JarFile jf = new JarFile(jar.toFile()); InputStream raw = jf.getInputStream(jf.getEntry(entry));
+                DataInputStream in = new DataInputStream(raw)) {
+            in.readInt();
+            in.readUnsignedShort();
+            in.readUnsignedShort();
+            int count = in.readUnsignedShort();
+            String[] utf8 = new String[count];
+            List<Integer> strings = new ArrayList<>();
+            for (int i = 1; i < count; i++) {
+                int tag = in.readUnsignedByte();
+                switch (tag) {
+                    case 1 -> utf8[i] = in.readUTF();
+                    case 3, 4 -> in.readInt();
+                    case 5, 6 -> {
+                        in.readLong();
+                        i++;
+                    }
+                    case 7, 16, 19, 20 -> in.readUnsignedShort();
+                    case 8 -> strings.add(in.readUnsignedShort());
+                    case 9, 10, 11, 12, 17, 18 -> in.readInt();
+                    case 15 -> {
+                        in.readUnsignedByte();
+                        in.readUnsignedShort();
+                    }
+                    default -> throw new IOException("Unknown constant pool tag " + tag);
+                }
+            }
+            for (int index : strings) {
+                result.add(utf8[index]);
+            }
+        }
+        return result;
+    }
+
+    static void section(String title, Map<String, String> entries) {
+        System.out.println("\n## " + title + " (" + entries.size() + ")");
+        entries.forEach((k, v) -> System.out.println("- " + k + (v.isEmpty() ? "" : "  " + v)));
+    }
+
+    static void list(String title, Set<String> entries) {
+        System.out.println("\n## " + title + " (" + entries.size() + ")");
+        entries.forEach(e -> System.out.println("- " + e));
+    }
+
+    static String members(Map<String, Object> entry) {
+        List<String> parts = new ArrayList<>();
+        for (String key : List.of("methods", "fields")) {
+            List<Map<String, Object>> l = list(entry.get(key));
+            if (!l.isEmpty()) {
+                parts.add(key + "=" + l.stream().map(m -> String.valueOf(m.get("name"))).toList());
+            }
+        }
+        return String.join(" ", parts);
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> map(Object o) {
+        return o instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    static List<Map<String, Object>> list(Object o) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (o instanceof List<?> l) {
+            l.forEach(item -> result.add(map(item)));
+        }
+        return result;
+    }
+
+    static List<String> strings(Object o) {
+        List<String> result = new ArrayList<>();
+        if (o instanceof List<?> l) {
+            l.forEach(item -> result.add(String.valueOf(item)));
+        }
+        return result;
+    }
+
+    static Pattern globToRegex(String glob) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < glob.length(); i++) {
+            char c = glob.charAt(i);
+            if (c == '*') {
+                if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
+                    if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
+                        // "**/" : any number of directories, none included
+                        sb.append("(?:.*/)?");
+                        i += 2;
+                    } else {
+                        sb.append(".*");
+                        i++;
+                    }
+                } else {
+                    sb.append("[^/]*");
+                }
+            } else if (c == '?') {
+                sb.append("[^/]");
+            } else {
+                sb.append(Pattern.quote(String.valueOf(c)));
+            }
+        }
+        return Pattern.compile(sb.toString());
+    }
+
+    /**
+     * WINDOWS, LINUX or MAC.
+     */
+    static String currentPlatform() {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return os.startsWith("windows") ? "WINDOWS" : os.startsWith("mac") ? "MAC" : "LINUX";
+    }
+
+    /**
+     * The Quarkus version of the showcase pom.xml (quarkus.platform.version), 3.40.0 by default.
+     */
+    static String quarkusVersion() {
+        try {
+            Matcher m = Pattern.compile("<quarkus\\.platform\\.version>([^<]+)</quarkus\\.platform\\.version>")
+                    .matcher(Files.readString(Path.of("pom.xml")));
+            if (m.find()) {
+                return m.group(1).trim();
+            }
+        } catch (IOException e) {
+            // default
+        }
+        return "3.40.0";
+    }
+}

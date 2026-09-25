@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.quarkiverse.desktop.showcase</groupId>
+    <artifactId>quarkus-desktop-showcase</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>Quarkus Desktop Showcase</name>
+    <description>Exercises AWT, Java2D and Swing features through quarkus-desktop, to compare JVM and native rendering</description>
+
+    <properties>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <quarkus.platform.version>3.40.0</quarkus.platform.version>
+        <quarkus-desktop.version>999-SNAPSHOT</quarkus-desktop.version>
+        <compiler-plugin.version>3.14.0</compiler-plugin.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- quarkus-desktop-swing (default) or quarkus-desktop-awt (awt-only) : see the profiles -->
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build</goal>
+                            <goal>generate-code</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${compiler-plugin.version}</version>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <!-- Default variant : Swing main window, every page -->
+            <id>swing</id>
+            <activation>
+                <property>
+                    <name>!awt-only</name>
+                </property>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>io.quarkiverse.desktop</groupId>
+                    <artifactId>quarkus-desktop-swing</artifactId>
+                    <version>${quarkus-desktop.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <!--
+                AWT only variant (-Dawt-only) : AWT main window, AWT pages, quarkus-desktop-awt alone. The application
+                classes using javax.swing are neither compiled nor CDI beans, so the executable contains no application
+                Swing code. It is built into target/awt-only, next to the default variant.
+            -->
+            <id>awt-only</id>
+            <activation>
+                <property>
+                    <name>awt-only</name>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.arc.exclude-types>io.quarkiverse.desktop.showcase.pages.swing.**,io.quarkiverse.desktop.showcase.pages.laf.**,io.quarkiverse.desktop.showcase.ui.swing.**</quarkus.arc.exclude-types>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>io.quarkiverse.desktop</groupId>
+                    <artifactId>quarkus-desktop-awt</artifactId>
+                    <version>${quarkus-desktop.version}</version>
+                </dependency>
+            </dependencies>
+            <build>
+                <directory>${project.basedir}/target/awt-only</directory>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <version>${compiler-plugin.version}</version>
+                        <configuration>
+                            <excludes>
+                                <exclude>io/quarkiverse/desktop/showcase/pages/swing/**</exclude>
+                                <exclude>io/quarkiverse/desktop/showcase/pages/laf/**</exclude>
+                                <exclude>io/quarkiverse/desktop/showcase/ui/swing/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>native</id>
+            <activation>
+                <property>
+                    <name>native</name>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.native.enabled>true</quarkus.native.enabled>
+                <quarkus.package.jar.enabled>false</quarkus.package.jar.enabled>
+            </properties>
+        </profile>
+    </profiles>
+</project>
