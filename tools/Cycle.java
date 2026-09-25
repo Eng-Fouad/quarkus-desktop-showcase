@@ -11,13 +11,17 @@ import java.util.List;
  * comparison. Results: comparison/jvm-&lt;label&gt;, comparison/native-&lt;label&gt;, comparison/diff-&lt;label&gt;
  * (summary.txt, index.html), build logs in comparison/logs-&lt;label&gt;.
  * <p>
- * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--skip-jvm] [--skip-native-build] [--offline] [--awt-only]
- * [--hidpi] [--pages=ids] [--categories=names] [--maven-args=a,b] [--native-args=a,b] [-- snapshot options...]
+ * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline]
+ * [--awt-only] [--hidpi] [--pages=ids] [--categories=names] [--maven-args=a,b] [--native-args=a,b]
+ * [-- snapshot options...]
  * <p>
  * --awt-only builds and runs the AWT only variant (mvn -Dawt-only, target/awt-only). --hidpi runs both snapshot runs
  * without the -Dsun.java2d.uiScale=1 default (DPI awareness check). --maven-args is a comma separated list of extra
  * Maven arguments for both builds. --native-args is a comma separated list of native-image options, e.g.
- * --native-args=-H:+PrintClassInitialization. Options after {@code --} apply to both snapshot runs.
+ * --native-args=-H:+PrintClassInitialization. --exact builds with --exact-reachability-metadata and runs the native
+ * executable with -XX:MissingRegistrationReportingMode=Warn : the reflection, JNI and resource accesses missing from the
+ * metadata are reported in the native run.log instead of failing silently or at the first one. Options after
+ * {@code --} apply to both snapshot runs.
  * <p>
  * Maven builds with the JDK running this tool : run it with GraalVM's java for native builds
  * ({@code $GRAALVM_HOME/bin/java tools/Cycle.java win1}), which also runs the JVM snapshots on GraalVM (the same JDK
@@ -27,7 +31,7 @@ public class Cycle {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0 || args[0].startsWith("--")) {
-            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--skip-jvm] [--skip-native-build] [--offline] "
+            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline] "
                     + "[--awt-only] [--hidpi] [--pages=ids] [--categories=names] [--maven-args=a,b] [--native-args=a,b] "
                     + "[-- snapshot options...]");
             System.exit(2);
@@ -37,6 +41,7 @@ public class Cycle {
         boolean skipJvm = false;
         boolean skipNativeBuild = false;
         boolean offline = false;
+        boolean exact = false;
         String nativeArgs = null;
         List<String> mavenArgs = new ArrayList<>();
         Snapshot.Options snapshot = new Snapshot.Options();
@@ -55,6 +60,8 @@ public class Cycle {
                 skipNativeBuild = true;
             } else if (arg.equals("--offline")) {
                 offline = true;
+            } else if (arg.equals("--exact")) {
+                exact = true;
             } else if (arg.equals("--awt-only")) {
                 snapshot.awtOnly = true;
             } else if (arg.equals("--hidpi")) {
@@ -110,9 +117,15 @@ public class Cycle {
             List<String> build = new ArrayList<>(List.of("-B", "package", "-Dnative", "-DskipTests",
                     "-Dquarkus.native.native-image-xmx=8g"));
             build.addAll(mavenArgs);
+            List<String> additional = new ArrayList<>();
+            if (exact) {
+                additional.add("--exact-reachability-metadata");
+            }
             if (nativeArgs != null) {
-                build.add("-Dquarkus.native.additional-build-args=-H:+UnlockExperimentalVMOptions," + nativeArgs
-                        + ",-H:-UnlockExperimentalVMOptions");
+                additional.add("-H:+UnlockExperimentalVMOptions," + nativeArgs + ",-H:-UnlockExperimentalVMOptions");
+            }
+            if (!additional.isEmpty()) {
+                build.add("-Dquarkus.native.additional-build-args=" + String.join(",", additional));
             }
             Path log = logs.resolve("native-build.log");
             if (maven(log, offline, build) != 0) {
@@ -126,6 +139,10 @@ public class Cycle {
         }
 
         step("native snapshots");
+        if (exact) {
+            // report every access missing from the metadata instead of failing at the first one
+            snapshot.nativeOptions.add("-XX:MissingRegistrationReportingMode=Warn");
+        }
         Snapshot.run("native", "native-" + label, snapshot);
 
         step("compare");

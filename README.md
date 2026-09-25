@@ -76,11 +76,14 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
   window per page (`<page>--screen.png`, reported as `SCREEN`, never a mismatch).
 - `--trace` (JVM only) runs under the GraalVM tracing agent (`comparison/<label>/metadata`), see below.
 
-`java tools/Cycle.java <label> [--trace] [--awt-only] [--hidpi] [--pages=...] [--offline] [--skip-jvm]
+`java tools/Cycle.java <label> [--trace] [--exact] [--awt-only] [--hidpi] [--pages=...] [--offline] [--skip-jvm]
 [--skip-native-build] [--maven-args=a,b] [--native-args=a,b] [-- options]` runs a whole iteration: JVM build and
 snapshots, native build and snapshots, comparison (`comparison/{jvm,native,diff,logs}-<label>`). Run it with GraalVM's
 java (`$GRAALVM_HOME/bin/java tools/Cycle.java win1`): Maven builds with the JDK running the tool, and both runs then use
-the same JDK build.
+the same JDK build. `--exact` builds with `--exact-reachability-metadata` and runs the executable with
+`-XX:MissingRegistrationReportingMode=Warn`, so that every reflection, JNI or resource access missing from the metadata
+is reported in the native `run.log`; the Snapshot tool prints how many `run.log` lines mention missing metadata
+(`Missing*RegistrationError`, `NoSuchFieldError`, `UnsatisfiedLinkError`...).
 
 Compare verdicts per image: `IDENTICAL`, `NOISE` (at most 2 levels per channel on less than 0.5 % of the pixels: the
 same differences appear between two JVM runs using different execution modes, JIT vs `-Xint`), `DIFFERENT`, `SIZE`,

@@ -36,6 +36,10 @@ import java.util.stream.Stream;
  */
 public class Snapshot {
 
+    static final java.util.regex.Pattern MISSING_METADATA = java.util.regex.Pattern.compile(
+            "Missing[A-Za-z]*RegistrationError|NoSuchFieldError|NoSuchMethodError|UnsatisfiedLinkError|ClassNotFoundException"
+                    + "|MissingResourceException");
+
     public static void main(String[] args) throws Exception {
         List<String> positional = new ArrayList<>();
         Options o = new Options();
@@ -66,6 +70,10 @@ public class Snapshot {
                 positional.add(arg);
             }
         }
+        if (o.trace && !positional.isEmpty() && !positional.getFirst().equals("jvm")) {
+            System.err.println("--trace runs the JVM under the tracing agent : jvm mode only");
+            System.exit(2);
+        }
         if (positional.isEmpty() || !List.of("jvm", "native").contains(positional.getFirst())) {
             System.err.println("usage: java tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] "
                     + "[--awt-only] [--hidpi] [--screen] [--trace] [--timeout=seconds] [-- options...]");
@@ -88,6 +96,8 @@ public class Snapshot {
         boolean trace;
         long timeoutSeconds = 900;
         List<String> options = new ArrayList<>();
+        /** Options for native runs only (e.g. -XX:MissingRegistrationReportingMode=Warn). */
+        List<String> nativeOptions = new ArrayList<>();
 
         Options copy() {
             Options c = new Options();
@@ -99,6 +109,7 @@ public class Snapshot {
             c.trace = trace;
             c.timeoutSeconds = timeoutSeconds;
             c.options = new ArrayList<>(options);
+            c.nativeOptions = new ArrayList<>(nativeOptions);
             return c;
         }
     }
@@ -142,6 +153,9 @@ public class Snapshot {
             command.add("-Dsun.java2d.uiScale=1");
         }
         command.addAll(o.options);
+        if (mode.equals("native")) {
+            command.addAll(o.nativeOptions);
+        }
         if (mode.equals("jvm")) {
             command.add("-jar");
             command.add(target.resolve("quarkus-app").resolve("quarkus-run.jar").toString());
@@ -175,6 +189,11 @@ public class Snapshot {
                 warning = " WARNING: main window " + ui + " (" + target + " is not the " + (o.awtOnly ? "awt-only" : "default")
                         + " variant ?)";
             }
+        }
+        // errors of missing native image metadata (with -XX:MissingRegistrationReportingMode=Warn : every one of them)
+        long missing = Files.readAllLines(log).stream().filter(l -> MISSING_METADATA.matcher(l).find()).count();
+        if (missing > 0) {
+            warning += " " + missing + " run.log lines about missing metadata (" + MISSING_METADATA.pattern() + ")";
         }
         System.out.println(label + ": exit=" + exit + ", " + images + " images, "
                 + (report ? "report.json written" : "NO report.json") + warning);
