@@ -61,23 +61,28 @@ public class MetadataDiff {
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
             "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_CLASSES",
             "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES", "RESOURCE_GLOBS",
-            "SERVICE_PROVIDERS");
+            "SERVICE_PROVIDERS", "REFLECTIVE_FIELDS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES");
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
             System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] "
-                    + "[--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
+                    + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
             System.exit(2);
         }
         Path metadata = Path.of(args[0]);
         String platform = currentPlatform();
         boolean awtOnly = false;
+        // the JAVA_BEANS_CLASSES lists count as registered (quarkus.desktop.*.java-beans.jdk-classes=true : the AWT one by
+        // default, the Swing one in the application.properties of the showcase) unless --no-java-beans
+        boolean javaBeans = true;
         String version = "999-SNAPSHOT";
         String quarkusVersion = quarkusVersion();
         for (int i = 1; i < args.length; i++) {
             String arg = args[i];
             if (arg.equals("--awt-only")) {
                 awtOnly = true;
+            } else if (arg.equals("--no-java-beans")) {
+                javaBeans = false;
             } else if (arg.startsWith("--version=")) {
                 version = arg.substring("--version=".length());
             } else if (arg.startsWith("--quarkus-version=")) {
@@ -90,7 +95,7 @@ public class MetadataDiff {
         boolean samePlatform = platform.equals(currentPlatform());
 
         Universe universe = Universe.load();
-        Registrations reg = new Registrations(universe);
+        Registrations reg = new Registrations(universe, javaBeans);
         List<String> sources = new ArrayList<>();
         for (String[] extension : extensions(awtOnly)) {
             Path jar = M2.resolve("io/quarkiverse/desktop/" + extension[0] + "/" + version + "/" + extension[0] + "-"
@@ -102,6 +107,7 @@ public class MetadataDiff {
             Map<String, String[]> lists = readLists(jar, extension[1]);
             sources.add(jar + " (" + Files.getLastModifiedTime(jar) + ") : " + lists.size() + " lists");
             reg.add(extension[2], lists, platform);
+            reg.serializable.addAll(serializableClasses(jar, extension[1]));
         }
         Path awtDeployment = M2.resolve("io/quarkus/quarkus-awt-deployment/" + quarkusVersion + "/quarkus-awt-deployment-"
                 + quarkusVersion + ".jar");
@@ -166,7 +172,7 @@ public class MetadataDiff {
             boolean jni = Boolean.TRUE.equals(entry.get("jniAccessible"));
             String component = type.replace("[]", "");
             boolean desktop = universe.isDesktop(component);
-            if (Boolean.TRUE.equals(entry.get("serializable")) && desktop) {
+            if (Boolean.TRUE.equals(entry.get("serializable")) && desktop && !reg.serializable.contains(type)) {
                 serialization.add(type);
             }
             if (!desktop) {
@@ -243,7 +249,8 @@ public class MetadataDiff {
                 + "--exact-reachability-metadata)", negativeLookups);
         list("Resources not included", missingResources);
         list("Resource bundles not included", missingBundles);
-        list("Serialization of desktop types (no list kind : register in the extension code)", serialization);
+        list("Serialization of desktop types (no list kind : the *SERIALIZABLE* constants of the extension code)",
+                serialization);
         list("Dynamic proxies with desktop interfaces (no list kind : register in the extension code)", proxies);
         list("Array types of desktop classes (reflection on array classes, usually harmless)", arrays);
         section("Not in the lists but named by io.quarkus:quarkus-awt (heuristic : constant pool of AwtProcessor)",
@@ -280,6 +287,29 @@ public class MetadataDiff {
     }
 
     /**
+     * The classes registered for serialization by the extension code : the static {@code String} and {@code List} fields
+     * of {@code className} whose name contains {@code SERIALIZABLE}.
+     */
+    static Set<String> serializableClasses(Path jar, String className) throws Exception {
+        Set<String> classes = new TreeSet<>();
+        try (URLClassLoader cl = new URLClassLoader(new URL[] { jar.toUri().toURL() }, ClassLoader.getPlatformClassLoader())) {
+            Class<?> c = Class.forName(className, true, cl);
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) && f.getName().contains("SERIALIZABLE")) {
+                    f.setAccessible(true);
+                    Object value = f.get(null);
+                    if (value instanceof String s) {
+                        classes.add(s);
+                    } else if (value instanceof List<?> l) {
+                        l.forEach(v -> classes.add(String.valueOf(v)));
+                    }
+                }
+            }
+        }
+        return classes;
+    }
+
+    /**
      * Every static String[] field of {@code className}, read from {@code jar} in an isolated class loader.
      */
     static Map<String, String[]> readLists(Path jar, String className) throws Exception {
@@ -306,6 +336,7 @@ public class MetadataDiff {
         final Set<String> reflectiveConstructors = new HashSet<>();
         final Set<String> reflectiveMethods = new HashSet<>();
         final Set<String> reflectiveMethodOwners = new HashSet<>();
+        final Set<String> reflectiveFields = new HashSet<>();
         final Set<String> providers = new HashSet<>();
         final Set<String> jniClasses = new HashSet<>();
         final Set<String> jniMembers = new HashSet<>();
@@ -313,11 +344,16 @@ public class MetadataDiff {
         final Set<String> bundles = new HashSet<>();
         final List<Pattern> globs = new ArrayList<>();
         final Map<String, List<String>> platformLists = new TreeMap<>();
+        // classes registered with their public constructors, methods (inherited ones included) and fields
+        final Set<String> publicMembers = new HashSet<>();
+        final Set<String> serializable = new HashSet<>();
+        final boolean javaBeans;
         // list name (source.FIELD) -> entries, for the stale check
         final Map<String, String[]> all = new TreeMap<>();
 
-        Registrations(Universe universe) {
+        Registrations(Universe universe, boolean javaBeans) {
             this.universe = universe;
+            this.javaBeans = javaBeans;
         }
 
         void add(String source, Map<String, String[]> lists, String platform) {
@@ -345,6 +381,16 @@ public class MetadataDiff {
                         }
                         case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
                         case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
+                        case "REFLECTIVE_FIELDS" -> {
+                            reflectiveFields.add(v);
+                            reflectiveMethodOwners.add(owner(v));
+                        }
+                        case "REFLECTIVE_PUBLIC_MEMBERS" -> publicMembers.add(v);
+                        case "JAVA_BEANS_CLASSES" -> {
+                            if (javaBeans) {
+                                publicMembers.add(v);
+                            }
+                        }
                         default -> {
                         }
                     }
@@ -376,7 +422,8 @@ public class MetadataDiff {
             boolean all = in(reflectiveClasses, type);
             boolean constructors = all || in(reflectiveConstructors, type) || in(providers, type);
             boolean methods = all || in(providers, type);
-            boolean typeRegistered = constructors || methods || reflectiveMethodOwners.contains(type);
+            boolean typeRegistered = constructors || methods || reflectiveMethodOwners.contains(type)
+                    || publicMembers.contains(type);
             if (!typeRegistered) {
                 missing.add("type");
             }
@@ -385,12 +432,16 @@ public class MetadataDiff {
                 String signature = type + "#" + name + "(" + String.join(",", strings(m.get("parameterTypes"))) + ")";
                 boolean covered = name.equals("<init>") ? constructors || reflectiveMethods.contains(signature)
                         : methods || reflectiveMethods.contains(signature);
+                if (!covered && publicMember(type, name, strings(m.get("parameterTypes")), null)) {
+                    covered = true;
+                }
                 if (!covered) {
                     missing.add("method " + signature.substring(type.length()));
                 }
             }
             for (Map<String, Object> f : list(entry.get("fields"))) {
-                if (!all) {
+                if (!all && !reflectiveFields.contains(type + "#" + f.get("name"))
+                        && !publicMember(type, null, null, String.valueOf(f.get("name")))) {
                     missing.add("field #" + f.get("name"));
                 }
             }
@@ -428,6 +479,52 @@ public class MetadataDiff {
                 }
             }
             return missing;
+        }
+
+        /**
+         * Whether a public constructor, method or field of {@code type} is registered by a public members registration
+         * of {@code type} or of a subclass (Class.getMethods() of a subclass returns the inherited public methods).
+         */
+        boolean publicMember(String type, String method, List<String> parameterTypes, String field) {
+            if (publicMembers.isEmpty()) {
+                return false;
+            }
+            Class<?> declaring = Universe.loadAny(type);
+            if (declaring == null || !Modifier.isPublic(declaring.getModifiers())) {
+                return false;
+            }
+            try {
+                if (field != null) {
+                    if (!Modifier.isPublic(declaring.getDeclaredField(field).getModifiers())) {
+                        return false;
+                    }
+                } else {
+                    Class<?>[] parameters = new Class<?>[parameterTypes.size()];
+                    for (int i = 0; i < parameters.length; i++) {
+                        parameters[i] = Universe.loadAny(parameterTypes.get(i));
+                        if (parameters[i] == null) {
+                            return false;
+                        }
+                    }
+                    int modifiers = method.equals("<init>") ? declaring.getDeclaredConstructor(parameters).getModifiers()
+                            : declaring.getDeclaredMethod(method, parameters).getModifiers();
+                    if (!Modifier.isPublic(modifiers)) {
+                        return false;
+                    }
+                    if (method.equals("<init>")) {
+                        return publicMembers.contains(type);
+                    }
+                }
+            } catch (ReflectiveOperationException | LinkageError e) {
+                return false;
+            }
+            for (String registered : publicMembers) {
+                Class<?> c = Universe.loadAny(registered);
+                if (c != null && declaring.isAssignableFrom(c)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         boolean resourceCovered(String path) {
@@ -472,12 +569,15 @@ public class MetadataDiff {
                     String problem = switch (kind) {
                         case "RESOURCE_BUNDLES" -> {
                             String bundle = v.contains(":") ? v.substring(v.indexOf(':') + 1) : v;
-                            yield universe.classes.containsKey(bundle)
-                                    || universe.resources.contains(bundle.replace('.', '/') + ".properties") ? null
+                            String properties = bundle.replace('.', '/') + ".properties";
+                            // bundles of other JDK modules (the messages of the XML parser of java.xml...)
+                            yield universe.classes.containsKey(bundle) || universe.resources.contains(properties)
+                                    || Universe.loadAny(bundle) != null || Universe.allResources().contains(properties)
+                                            ? null
                                             : "no such bundle";
                         }
                         case "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_METHODS" -> universe.checkMethod(v);
-                        case "JNI_RUNTIME_ACCESS_FIELDS" -> universe.checkField(v);
+                        case "JNI_RUNTIME_ACCESS_FIELDS", "REFLECTIVE_FIELDS" -> universe.checkField(v);
                         // entries outside the desktop modules (java.lang.String, byte[]...) are checked in the whole JDK
                         default -> universe.isClassOrPackage(v) || Universe.loadAny(v) != null ? null
                                 : "no such class or package";

@@ -122,10 +122,13 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
 - `java tools/Cycle.java <label> --trace` (or `java tools/Snapshot.java jvm trace --trace`): JVM snapshots under the
   GraalVM tracing agent, then `tools/MetadataDiff.java` lists the JNI, reflection, resource, bundle, serialization and
   proxy accesses of the JDK desktop modules that quarkus-desktop does not register for the current platform:
-  `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux] [--awt-only]`.
+  `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux] [--awt-only]
+  [--no-java-beans]`.
   It reads the `static String[]` lists of `io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources` and
   `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2`,
-  understands package entries and `fqcn#member` entries, and also lists stale entries (names that do not exist in the JDK).
+  understands package entries, `fqcn#member` entries and the classes registered with their public members
+  (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
+  `java-beans.jdk-classes` properties), and also lists stale entries (names that do not exist in the JDK).
 - `java tools/ClinitAudit.java [windows|linux] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
