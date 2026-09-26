@@ -460,8 +460,9 @@ public class MetadataDiff {
                 if (kind.equals("RESOURCE_GLOBS")) {
                     for (String glob : values) {
                         Pattern pattern = globToRegex(glob);
-                        if (!glob.startsWith("META-INF") && universe.resources.stream().noneMatch(r -> pattern.matcher(r).matches())) {
-                            stale.add(list + ": " + glob + " (matches no resource of the desktop modules)");
+                        if (!glob.startsWith("META-INF") && universe.resources.stream().noneMatch(r -> pattern.matcher(r).matches())
+                                && Universe.allResources().stream().noneMatch(r -> pattern.matcher(r).matches())) {
+                            stale.add(list + ": " + glob + " (matches no resource of the JDK)");
                         }
                     }
                     return;
@@ -477,7 +478,9 @@ public class MetadataDiff {
                         }
                         case "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_METHODS" -> universe.checkMethod(v);
                         case "JNI_RUNTIME_ACCESS_FIELDS" -> universe.checkField(v);
-                        default -> universe.isClassOrPackage(v) ? null : "no such class or package";
+                        // entries outside the desktop modules (java.lang.String, byte[]...) are checked in the whole JDK
+                        default -> universe.isClassOrPackage(v) || Universe.loadAny(v) != null ? null
+                                : "no such class or package";
                     };
                     if (problem != null) {
                         stale.add(list + ": " + value + " (" + problem + ")");
@@ -583,6 +586,50 @@ public class MetadataDiff {
             } catch (Throwable t) {
                 return null;
             }
+        }
+
+        private static Set<String> allResources;
+
+        /**
+         * The resources of every module of the JDK (for list entries outside the desktop modules).
+         */
+        static synchronized Set<String> allResources() {
+            if (allResources == null) {
+                Set<String> all = new TreeSet<>();
+                try (Stream<Path> modules = Files.list(FileSystems.getFileSystem(URI.create("jrt:/")).getPath("/modules"))) {
+                    for (Path module : modules.toList()) {
+                        try (Stream<Path> files = Files.walk(module)) {
+                            files.filter(Files::isRegularFile).map(f -> module.relativize(f).toString().replace('\\', '/'))
+                                    .filter(n -> !n.endsWith(".class")).forEach(all::add);
+                        }
+                    }
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                allResources = all;
+            }
+            return allResources;
+        }
+
+        /**
+         * A class of any module of the JDK, arrays ({@code byte[]}, {@code java.lang.String[]}) included.
+         */
+        static Class<?> loadAny(String name) {
+            if (name.endsWith("[]")) {
+                Class<?> component = loadAny(name.substring(0, name.length() - 2));
+                return component == null ? null : component.arrayType();
+            }
+            return switch (name) {
+                case "boolean" -> boolean.class;
+                case "byte" -> byte.class;
+                case "char" -> char.class;
+                case "short" -> short.class;
+                case "int" -> int.class;
+                case "long" -> long.class;
+                case "float" -> float.class;
+                case "double" -> double.class;
+                default -> load(name);
+            };
         }
 
         static Class<?> load(String name) {
