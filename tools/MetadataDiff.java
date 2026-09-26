@@ -34,7 +34,7 @@ import java.util.stream.Stream;
  * {@code io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources}, read from the deployment jars installed in
  * the local Maven repository (so the installed snapshot is compared, not the sources).
  * <p>
- * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] [--version=999-SNAPSHOT]
+ * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] [--version=999-SNAPSHOT]
  * [--quarkus-version=3.40.0]
  * <p>
  * Universe : the classes and resources of the JDK modules java.desktop, java.datatransfer, jdk.unsupported.desktop and
@@ -59,13 +59,14 @@ public class MetadataDiff {
             "com.sun.java.accessibility", "com.sun.accessibility", "jdk.swing.interop", "java.applet", "sun.lwawt",
             "com.apple.eawt", "com.apple.laf");
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
-            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_CLASSES",
+            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
+            "JNI_RUNTIME_ACCESS_CLASSES",
             "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES", "RESOURCE_GLOBS",
             "SERVICE_PROVIDERS");
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] "
+            System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] "
                     + "[--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
             System.exit(2);
         }
@@ -306,6 +307,7 @@ public class MetadataDiff {
         final Set<String> reflectiveConstructors = new HashSet<>();
         final Set<String> reflectiveMethods = new HashSet<>();
         final Set<String> reflectiveMethodOwners = new HashSet<>();
+        final Set<String> reflectiveFields = new HashSet<>();
         final Set<String> providers = new HashSet<>();
         final Set<String> jniClasses = new HashSet<>();
         final Set<String> jniMembers = new HashSet<>();
@@ -335,6 +337,10 @@ public class MetadataDiff {
                         case "REFLECTIVE_CONSTRUCTORS" -> reflectiveConstructors.add(v);
                         case "REFLECTIVE_METHODS" -> {
                             reflectiveMethods.add(v);
+                            reflectiveMethodOwners.add(owner(v));
+                        }
+                        case "REFLECTIVE_FIELDS" -> {
+                            reflectiveFields.add(v);
                             reflectiveMethodOwners.add(owner(v));
                         }
                         case "SERVICE_PROVIDERS" -> providers.add(v);
@@ -390,7 +396,7 @@ public class MetadataDiff {
                 }
             }
             for (Map<String, Object> f : list(entry.get("fields"))) {
-                if (!all) {
+                if (!all && !reflectiveFields.contains(type + "#" + f.get("name"))) {
                     missing.add("field #" + f.get("name"));
                 }
             }
@@ -477,7 +483,7 @@ public class MetadataDiff {
                                             : "no such bundle";
                         }
                         case "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_METHODS" -> universe.checkMethod(v);
-                        case "JNI_RUNTIME_ACCESS_FIELDS" -> universe.checkField(v);
+                        case "JNI_RUNTIME_ACCESS_FIELDS", "REFLECTIVE_FIELDS" -> universe.checkField(v);
                         // entries outside the desktop modules (java.lang.String, byte[]...) are checked in the whole JDK
                         default -> universe.isClassOrPackage(v) || Universe.loadAny(v) != null ? null
                                 : "no such class or package";

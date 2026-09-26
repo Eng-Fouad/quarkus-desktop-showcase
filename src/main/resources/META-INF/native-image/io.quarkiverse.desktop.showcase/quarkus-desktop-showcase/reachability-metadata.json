@@ -1,4 +1,8 @@
 {
+  "reflection": [
+    { "type": "java.awt.Component", "fields": [ { "name": "peer" } ] },
+    { "type": "sun.lwawt.LWComponentPeer", "methods": [ { "name": "getDelegate", "parameterTypes": [] } ] }
+  ],
   "resources": [
     { "glob": "META-INF/services/javax.imageio.spi.ImageReaderSpi" },
     { "glob": "META-INF/services/javax.imageio.spi.ImageWriterSpi" },

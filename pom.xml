@@ -120,6 +120,22 @@
             </build>
         </profile>
         <profile>
+            <!--
+                macOS : the capture of the AWT components (core/MacPeers) reads java.awt.Component#peer and calls
+                sun.lwawt.LWComponentPeer#getDelegate() with reflection (tools/Snapshot.java passes the same add-opens to
+                the JVM)
+            -->
+            <id>mac</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <properties>
+                <quarkus.native.additional-build-args-append>--add-opens=java.desktop/java.awt=ALL-UNNAMED,--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED</quarkus.native.additional-build-args-append>
+            </properties>
+        </profile>
+        <profile>
             <id>native</id>
             <activation>
                 <property>

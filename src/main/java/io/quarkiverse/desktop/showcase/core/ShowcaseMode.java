@@ -15,6 +15,7 @@ public final class ShowcaseMode {
     private static volatile boolean snapshot;
     private static volatile boolean realInput = true;
     private static volatile String ui = "none";
+    private static volatile String mainThread = "unknown";
 
     private ShowcaseMode() {
     }
@@ -50,6 +51,22 @@ public final class ShowcaseMode {
      */
     public static String runtime() {
         return ImageMode.current().isNativeImage() ? "NATIVE" : "JVM";
+    }
+
+    /**
+     * The name of the thread that runs {@code QuarkusApplication.run} : {@code main} with the JVM and in native
+     * executables (on macOS, quarkus-desktop runs the application on a new thread named {@code main}, the first thread
+     * of the process running the Cocoa event loop, as with the {@code java} launcher).
+     */
+    public static String mainThread() {
+        return mainThread;
+    }
+
+    /**
+     * Records the thread that runs {@code QuarkusApplication.run} (called by it).
+     */
+    public static void mainThread(Thread thread) {
+        mainThread = thread.getName();
     }
 
     /**

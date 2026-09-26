@@ -7,6 +7,7 @@ import javax.swing.UIManager;
 import jakarta.inject.Singleton;
 
 import io.quarkiverse.desktop.showcase.core.EnvironmentProbe;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 
 /**
  * The look and feel of the run (Swing variant only).
@@ -18,5 +19,9 @@ public class SwingEnvironmentProbe implements EnvironmentProbe {
     public void describe(Map<String, Object> environment) {
         environment.put("lookAndFeel", UIManager.getLookAndFeel() == null ? "none"
                 : UIManager.getLookAndFeel().getClass().getName());
+        if (Platforms.isMac()) {
+            // the accent color of the macOS settings (Aqua reads it : the rendering depends on it)
+            environment.put("macos.focusColor", String.valueOf(UIManager.getColor("Focus.color")));
+        }
     }
 }

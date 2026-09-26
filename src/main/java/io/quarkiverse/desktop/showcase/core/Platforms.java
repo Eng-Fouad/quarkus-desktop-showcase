@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Operating system specific choices, so that pages run on Windows, Linux and macOS (JVM mode only on macOS).
+ * Operating system specific choices, so that pages run on Windows, Linux and macOS.
  * <p>
  * Snapshots are only compared between runs on the same machine (JVM vs native), so pages may render differently from one
  * operating system to another, but a check must not fail just because a font or a setting of another operating system
@@ -47,6 +47,30 @@ public final class Platforms {
 
     public static boolean isLinux() {
         return current() == Os.LINUX;
+    }
+
+    /**
+     * The major version of macOS ({@code "26.0"} gives 26), 0 on the other operating systems : the Aqua look and feel
+     * renders differently from one macOS release to another.
+     */
+    public static int macMajorVersion() {
+        if (!isMac()) {
+            return 0;
+        }
+        String version = System.getProperty("os.version", "0");
+        int dot = version.indexOf('.');
+        try {
+            return Integer.parseInt(dot < 0 ? version : version.substring(0, dot));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * {@code true} on a Mac with Apple silicon (the only macOS platform with GraalVM 25.1 or later builds).
+     */
+    public static boolean isAppleSilicon() {
+        return isMac() && "aarch64".equals(System.getProperty("os.arch"));
     }
 
     /**
@@ -107,7 +131,8 @@ public final class Platforms {
 
         /** Serif font. */
         public static String serif() {
-            return pickFamily(List.of("Times New Roman"), List.of("Times New Roman"),
+            // macOS : Times is the target of the logical Serif font (sun.font.CFontManager)
+            return pickFamily(List.of("Times", "Times New Roman"), List.of("Times New Roman"),
                     List.of("Liberation Serif", "DejaVu Serif", "Noto Serif"), "Serif");
         }
 

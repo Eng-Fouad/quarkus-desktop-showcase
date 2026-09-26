@@ -4,6 +4,8 @@ import java.awt.EventQueue;
 
 import jakarta.inject.Inject;
 
+import io.quarkiverse.desktop.showcase.core.MacEnvironment;
+import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkus.runtime.ApplicationLifecycleManager;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.QuarkusApplication;
@@ -21,6 +23,9 @@ public class ShowcaseMain implements QuarkusApplication {
 
     @Override
     public int run(String... args) {
+        ShowcaseMode.mainThread(Thread.currentThread());
+        // macOS, -Dshowcase.robot=true : the Robot permissions, before the user interface starts (off the EDT)
+        MacEnvironment.probePermissions();
         EventQueue.invokeLater(app::start);
         Quarkus.waitForExit();
         // 1 when the showcase failed to start
