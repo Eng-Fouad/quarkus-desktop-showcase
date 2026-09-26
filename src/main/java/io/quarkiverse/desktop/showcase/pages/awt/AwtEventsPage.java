@@ -871,8 +871,9 @@ public class AwtEventsPage implements FeaturePage {
             robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
             robot.delay(200);
             robot.idle();
-            captures.put("canvas-screen", robot.capture(new java.awt.Rectangle(origin.x, origin.y, CANVAS_WIDTH,
-                    CANVAS_HEIGHT)));
+            // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
+            captures.put("canvas-screen", robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
+                    CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16)));
             target.recording = false;
             if (!robot.skipped().isEmpty()) {
                 checks.add(Check.info("skipped inputs", "skipped: " + String.join(", ", robot.skipped())));

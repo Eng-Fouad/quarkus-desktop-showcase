@@ -156,7 +156,7 @@ public final class AccessibleDump {
             for (AccessibleIcon icon : icons) {
                 sizes.add(icon.getAccessibleIconWidth() + "x" + icon.getAccessibleIconHeight()
                         + (icon.getAccessibleIconDescription() == null ? ""
-                                : " \"" + icon.getAccessibleIconDescription() + "\""));
+                                : " \"" + iconDescription(icon.getAccessibleIconDescription()) + "\""));
             }
             details.add("icons " + String.join("|", sizes));
         }
@@ -185,6 +185,17 @@ public final class AccessibleDump {
             details.add("relations " + String.join("|", list));
         }
         return details;
+    }
+
+    /**
+     * The description of an {@code ImageIcon(URL)} is its URL ({@code jrt:} or {@code jar:} on the JVM, {@code resource:}
+     * in a native executable) : only its file name is kept.
+     */
+    static String iconDescription(String description) {
+        if (description.contains(":/") || description.startsWith("resource:")) {
+            return "URL of " + description.substring(description.lastIndexOf('/') + 1);
+        }
+        return description;
     }
 
     /**

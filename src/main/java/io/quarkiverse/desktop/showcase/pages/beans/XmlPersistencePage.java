@@ -556,9 +556,11 @@ public class XmlPersistencePage implements FeaturePage {
             XmlSupport.Decoded broken = XmlSupport.decode("<java><object class=\"java.awt.Point\"></java>", null);
             return broken.exceptions().isEmpty() ? "no exception" : broken.exceptions().get(0).split(":")[0];
         }));
-        checks.add(Checks.expect("unknown class : exception listener", "java.lang.ClassNotFoundException: no/such/Type", () -> {
+        // the message is the class loader's : "no/such/Type" from the Quarkus class loader of the JVM mode, "no.such.Type"
+        // from Class.forName in a native executable
+        checks.add(Checks.expect("unknown class : exception listener", "java.lang.ClassNotFoundException: no.such.Type", () -> {
             XmlSupport.Decoded unknown = XmlSupport.decode("<java><object class=\"no.such.Type\"/></java>", null);
-            return unknown.exceptions().isEmpty() ? "no exception" : unknown.exceptions().get(0);
+            return unknown.exceptions().isEmpty() ? "no exception" : unknown.exceptions().get(0).replace('/', '.');
         }));
         checks.add(Checks.expect("encoding a class without no-argument constructor : exception listener",
                 "java.lang.InstantiationException", () -> {

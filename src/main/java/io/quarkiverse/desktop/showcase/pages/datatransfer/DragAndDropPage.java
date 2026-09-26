@@ -278,6 +278,18 @@ public class DragAndDropPage implements FeaturePage {
             if (log.ended && log.success) {
                 break;
             }
+            if (log.started && !log.ended) {
+                // a slow drop (seen at 150 %) : wait longer. A drag that never ends (e.g. the native drag and drop
+                // callbacks are missing) is not retried : another attempt would only fail with "Drag and drop in
+                // progress", the checks below show the state reached
+                DesktopSupport.await(() -> log.ended, 4000);
+                if (!log.ended) {
+                    break;
+                }
+                if (log.success) {
+                    break;
+                }
+            }
             DesktopSupport.sleep(300);
         }
         if (outcome != null) {
@@ -326,6 +338,7 @@ public class DragAndDropPage implements FeaturePage {
 
         final List<String> sourceEvents = Collections.synchronizedList(new ArrayList<>());
         final List<String> targetEvents = Collections.synchronizedList(new ArrayList<>());
+        volatile boolean started;
         volatile boolean ended;
         volatile boolean success;
         volatile boolean motion;
@@ -338,6 +351,7 @@ public class DragAndDropPage implements FeaturePage {
         synchronized void reset() {
             sourceEvents.clear();
             targetEvents.clear();
+            started = false;
             ended = false;
             success = false;
             dropAction = 0;
@@ -509,6 +523,7 @@ public class DragAndDropPage implements FeaturePage {
                 if (tokens.contains(TOKENS[i]) && origin.x >= tokenX(i) && origin.x < tokenX(i) + TOKEN_SIZE
                         && origin.y >= 20 && origin.y < 20 + TOKEN_SIZE) {
                     Transferable t = new TokenTransferable(TOKENS[i]);
+                    log.started = true;
                     if (DragSource.isDragImageSupported()) {
                         log.dragImage = "used";
                         e.startDrag(null, dragImage(i), new Point(-24, -24), t, this);

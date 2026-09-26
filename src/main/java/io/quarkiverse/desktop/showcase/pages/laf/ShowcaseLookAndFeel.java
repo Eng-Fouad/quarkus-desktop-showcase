@@ -4,8 +4,10 @@ import java.awt.Color;
 import java.awt.Graphics;
 
 import javax.swing.AbstractButton;
+import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.UIDefaults;
+import javax.swing.plaf.BorderUIResource;
 import javax.swing.plaf.ColorUIResource;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.plaf.metal.MetalButtonUI;
@@ -28,6 +30,14 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 public class ShowcaseLookAndFeel extends MetalLookAndFeel {
 
     public ShowcaseLookAndFeel() {
+    }
+
+    /**
+     * The JDK classes named by the {@link UIDefaults.ProxyLazyValue}s of these defaults : loaded by name, constructor or
+     * static method invoked reflectively (application-level native configuration : the application chose them).
+     */
+    @RegisterForReflection(targets = { BorderUIResource.LineBorderUIResource.class, BorderFactory.class })
+    static final class ProxyLazyValueTargets {
     }
 
     @Override

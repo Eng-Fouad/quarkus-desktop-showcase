@@ -179,7 +179,9 @@ public class OnscreenPipelinePage implements FeaturePage {
         checks.add(Check.info("pipeline", ShowcaseMode.pipeline()));
         checks.add(Checks.info("sun.java2d properties", () -> {
             List<String> values = new ArrayList<>();
-            for (String name : List.of("d3d", "opengl", "noddraw", "xrender", "uiScale", "dpiaware")) {
+            // not dpiaware : quarkus-desktop sets it by default in a native executable (the java launcher does the
+            // same through its manifest), the environment of the report shows it (ENV NOTE)
+            for (String name : List.of("d3d", "opengl", "noddraw", "xrender", "uiScale")) {
                 String value = System.getProperty("sun.java2d." + name);
                 if (value != null) {
                     values.add(name + "=" + value);

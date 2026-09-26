@@ -309,6 +309,12 @@ public final class DesktopSupport {
          * @return {@code false} (nothing pressed) when no showcase window is focused
          */
         public boolean keyPress(int keyCode) {
+            // the previous key events are handled first : AWT translates a key into a character with the keyboard state
+            // of the moment it handles the key, so a Shift pressed right after a key could turn "a" into "A"
+            robot.delay(20);
+            if (!java.awt.EventQueue.isDispatchThread()) {
+                robot.waitForIdle();
+            }
             if (!Edt.ownsFocus()) {
                 return false;
             }

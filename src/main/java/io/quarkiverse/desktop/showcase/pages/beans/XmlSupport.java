@@ -56,6 +56,10 @@ public final class XmlSupport {
             for (Object object : objects) {
                 encoder.writeObject(object);
             }
+        } catch (Throwable t) {
+            // e.g. a StackOverflowError when the persistence delegates of java.beans.MetaData cannot be loaded (native
+            // image) : reported with the exceptions, so that the checks fail and the page still builds
+            exceptions.add("thrown: " + Checks.describe(t));
         }
         String xml = new String(out.toByteArray(), StandardCharsets.UTF_8)
                 .replaceFirst("<java version=\"[^\"]*\"", "<java version=\"(normalized)\"")
@@ -82,6 +86,8 @@ public final class XmlSupport {
                     break;
                 }
             }
+        } catch (Throwable t) {
+            exceptions.add("thrown: " + Checks.describe(t));
         }
         return new Decoded(List.copyOf(objects), List.copyOf(exceptions));
     }

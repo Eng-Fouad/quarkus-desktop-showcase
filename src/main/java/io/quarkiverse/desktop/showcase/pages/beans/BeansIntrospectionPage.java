@@ -66,7 +66,10 @@ import io.quarkus.runtime.annotations.RegisterForProxy;
  * are not registered by the application : missing registrations show here.
  */
 @Singleton
-@RegisterForProxy(targets = { ActionListener.class, PropertyChangeListener.class, PrintJobBean.JobListener.class })
+// one proxy class per interface (targets = {A, B} would register a single proxy class implementing both)
+@RegisterForProxy(targets = ActionListener.class)
+@RegisterForProxy(targets = PropertyChangeListener.class)
+@RegisterForProxy(targets = PrintJobBean.JobListener.class)
 public class BeansIntrospectionPage implements FeaturePage {
 
     @Override
@@ -368,8 +371,11 @@ public class BeansIntrospectionPage implements FeaturePage {
                     return Arrays.toString(editor.getTags()) + ", " + editor.getValue() + ", "
                             + editor.getJavaInitializationString();
                 }));
+        // no editor found (e.g. a native image without the JDK editors) : the checks using it fail, the page still builds
         PropertyEditor color = PropertyEditorManager.findEditor(Color.class);
-        color.setValue(new Color(255, 128, 0));
+        if (color != null) {
+            color.setValue(new Color(255, 128, 0));
+        }
         checks.add(Checks.expect("Color editor : text, Java initialization, paintable, custom editor",
                 "255,128,0, new java.awt.Color(-32768,true), true, true", () -> color.getAsText() + ", "
                         + color.getJavaInitializationString() + ", " + color.isPaintable() + ", "
@@ -379,7 +385,9 @@ public class BeansIntrospectionPage implements FeaturePage {
             return Checks.argb(image.getRGB(10, 5));
         }));
         PropertyEditor font = PropertyEditorManager.findEditor(Font.class);
-        font.setValue(new Font(Font.SERIF, Font.BOLD, 18));
+        if (font != null) {
+            font.setValue(new Font(Font.SERIF, Font.BOLD, 18));
+        }
         checks.add(Checks.expect("Font editor : Java initialization, text",
                 "new java.awt.Font(\"Serif\", 1, 18), Serif BOLD 18",
                 () -> font.getJavaInitializationString() + ", " + font.getAsText()));
@@ -405,7 +413,12 @@ public class BeansIntrospectionPage implements FeaturePage {
                     PropertyEditor editor = code.createPropertyEditor(new Ticket());
                     return editorName(editor) + " " + Arrays.toString(editor.getTags());
                 }));
-        return List.of(color.getCustomEditor(), font.getCustomEditor());
+        return List.of(customEditor(color, "java.awt.Color"), customEditor(font, "java.awt.Font"));
+    }
+
+    private static Component customEditor(PropertyEditor editor, String type) {
+        Component custom = editor == null ? null : editor.getCustomEditor();
+        return custom != null ? custom : Ui.text("no property editor for " + type);
     }
 
     private static String editorName(PropertyEditor editor) {

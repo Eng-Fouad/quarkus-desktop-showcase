@@ -125,6 +125,7 @@ public class MetadataDiff {
 
         Map<String, String> missingJni = new TreeMap<>();
         Map<String, String> missingReflection = new TreeMap<>();
+        Set<String> negativeLookups = new TreeSet<>();
         Map<String, String> byQuarkusAwt = new TreeMap<>();
         Set<String> serialization = new TreeSet<>();
         Set<String> proxies = new TreeSet<>();
@@ -185,10 +186,17 @@ public class MetadataDiff {
                 continue;
             }
             String description = String.join(" ", missing);
-            if (quarkusAwt.contains(type) || quarkusAwt.stream().anyMatch(p -> type.startsWith(p + "."))) {
+            // exact class names only : the packages that quarkus-awt names are run time initialization entries, not
+            // registrations (a package prefix match hid e.g. the JNI callbacks of sun.awt.dnd.SunDropTargetContextPeer)
+            if (quarkusAwt.contains(type)) {
                 byQuarkusAwt.put((jni ? "JNI " : "reflection ") + type, description);
             } else if (jni) {
                 missingJni.put(type, description);
+            } else if (samePlatform && !universe.classes.containsKey(type) && missing.equals(List.of("type"))) {
+                // Class.forName of a class that does not exist (BeanInfo, Customizer and PersistenceDelegate searches of
+                // java.beans, class names probed by Nimbus...) : the JDK expects the ClassNotFoundException, which a
+                // native image throws too, unless it is built with --exact-reachability-metadata
+                negativeLookups.add(type);
             } else {
                 missingReflection.put(type, description);
             }
@@ -231,6 +239,8 @@ public class MetadataDiff {
                 + universe.classes.size() + " classes, " + universe.resources.size() + " resources of " + MODULES);
         section("JNI accesses not registered", missingJni);
         section("Reflection accesses not registered", missingReflection);
+        list("Lookups of classes that do not exist in this JDK (expected to fail : only an issue with "
+                + "--exact-reachability-metadata)", negativeLookups);
         list("Resources not included", missingResources);
         list("Resource bundles not included", missingBundles);
         list("Serialization of desktop types (no list kind : register in the extension code)", serialization);
