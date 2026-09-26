@@ -1,0 +1,380 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synth look and feel of the quarkus-desktop showcase (page laf-synth-xml), loaded with
+  SynthLookAndFeel.load(InputStream, SynthXmlPage.class) : image paths are resolved with Class.getResource (absolute
+  paths), <object> elements are decoded by the JavaBeans XML decoder (reflection), color types and named colors are
+  looked up as public static fields (reflection), key strokes of input maps are parsed from strings.
+-->
+<synth>
+
+  <!-- beans (com.sun.beans.decoder) : JDK classes and an application class with bean properties -->
+  <object id="painter" class="io.quarkiverse.desktop.showcase.pages.laf.ShowcaseSynthPainter">
+    <void property="accent">
+      <object class="java.awt.Color">
+        <int>63</int>
+        <int>114</int>
+        <int>175</int>
+      </object>
+    </void>
+    <void property="arrowSize">
+      <int>7</int>
+    </void>
+  </object>
+  <object id="buttonMargin" class="javax.swing.plaf.InsetsUIResource">
+    <int>2</int>
+    <int>10</int>
+    <int>2</int>
+    <int>10</int>
+  </object>
+  <object id="graphicsUtils" class="javax.swing.plaf.synth.SynthGraphicsUtils"/>
+  <object id="beanTitle" class="java.lang.String">
+    <string>Synth from XML</string>
+  </object>
+
+  <!-- shared definitions -->
+  <color id="gridColor" value="#D5DCE6"/>
+  <font id="bold" name="Dialog" size="12" style="BOLD"/>
+  <imageIcon id="checkOff" path="/showcase/laf/synth/check-off.png"/>
+  <imageIcon id="checkOn" path="/showcase/laf/synth/check-on.png"/>
+  <imageIcon id="radioOff" path="/showcase/laf/synth/radio-off.png"/>
+  <imageIcon id="radioOn" path="/showcase/laf/synth/radio-on.png"/>
+  <imageIcon id="expanded" path="/showcase/laf/synth/expanded.png"/>
+  <imageIcon id="collapsed" path="/showcase/laf/synth/collapsed.png"/>
+  <imageIcon id="closeIcon" path="/showcase/laf/synth/close.png"/>
+  <imageIcon id="maximizeIcon" path="/showcase/laf/synth/maximize.png"/>
+  <imageIcon id="iconifyIcon" path="/showcase/laf/synth/iconify.png"/>
+  <imageIcon id="questionIcon" path="/showcase/laf/synth/question.png"/>
+  <imageIcon id="menuArrowImage" path="/showcase/laf/synth/menu-arrow.png"/>
+  <!-- an application Icon + SynthIcon bean with a bean property (no arrow for the menus of a menu bar) -->
+  <object id="menuArrow" class="io.quarkiverse.desktop.showcase.pages.laf.ShowcaseSynthPainter$MenuArrowIcon">
+    <void property="image">
+      <object idref="menuArrowImage"/>
+    </void>
+  </object>
+
+  <!-- UIDefaults entries (UIManager.getLookAndFeelDefaults) of every property type -->
+  <defaultsProperty key="Showcase.insets" type="insets" value="1 2 3 4"/>
+  <defaultsProperty key="Showcase.dimension" type="dimension" value="16 24"/>
+  <defaultsProperty key="Showcase.integer" type="integer" value="42"/>
+  <defaultsProperty key="Showcase.boolean" type="boolean" value="true"/>
+  <defaultsProperty key="Showcase.string" type="string" value="synth"/>
+  <defaultsProperty key="Showcase.title" type="idref" value="beanTitle"/>
+
+  <!-- every region -->
+  <style id="default">
+    <font name="Dialog" size="12"/>
+    <opaque value="true"/>
+    <graphicsUtils idref="graphicsUtils"/>
+    <property key="Showcase.painter" type="idref" value="painter"/>
+    <!-- colors belong to states : a state without value applies to every state -->
+    <state>
+      <color type="BACKGROUND" value="#F4F6FA"/>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+      <color type="TEXT_BACKGROUND" value="#FFFFFF"/>
+      <!-- a named color : java.awt.Color.ORANGE, looked up by reflection -->
+      <color type="FOCUS" value="ORANGE"/>
+    </state>
+    <state value="SELECTED">
+      <color type="TEXT_BACKGROUND" value="#3F72AF"/>
+      <color type="TEXT_FOREGROUND" value="#FFFFFF"/>
+    </state>
+    <state value="DISABLED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#9AA3AF"/>
+    </state>
+  </style>
+  <bind style="default" type="region" key=".*"/>
+
+  <style id="button" clone="default">
+    <opaque value="false"/>
+    <font idref="bold"/>
+    <insets top="4" left="12" bottom="4" right="12"/>
+    <property key="Button.margin" type="idref" value="buttonMargin"/>
+    <property key="Button.textShiftOffset" type="integer" value="1"/>
+    <property key="ToggleButton.textShiftOffset" type="integer" value="1"/>
+    <imagePainter method="buttonBackground" path="/showcase/laf/synth/button.png" sourceInsets="8 8 8 8"/>
+    <imagePainter method="toggleButtonBackground" path="/showcase/laf/synth/button.png" sourceInsets="8 8 8 8"/>
+    <state>
+      <color type="BACKGROUND" value="#F4F6FA"/>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+      <!-- the long form of a color type : class ColorType loaded by name, field FOCUS by reflection -->
+      <color type="javax.swing.plaf.synth.ColorType.FOCUS" value="#E65100"/>
+    </state>
+    <state value="PRESSED">
+      <imagePainter method="buttonBackground" path="/showcase/laf/synth/button-pressed.png" sourceInsets="8 8 8 8"/>
+    </state>
+    <state value="SELECTED">
+      <color type="TEXT_FOREGROUND" value="#6D2F00"/>
+      <imagePainter method="toggleButtonBackground" path="/showcase/laf/synth/button-selected.png"
+                    sourceInsets="8 8 8 8"/>
+    </state>
+    <state value="DISABLED">
+      <color type="TEXT_FOREGROUND" value="#9AA3AF"/>
+      <imagePainter method="buttonBackground" path="/showcase/laf/synth/button-disabled.png" sourceInsets="8 8 8 8"/>
+    </state>
+  </style>
+  <bind style="button" type="region" key="Button"/>
+  <bind style="button" type="region" key="ToggleButton"/>
+
+  <style id="check" clone="default">
+    <opaque value="false"/>
+    <property key="CheckBox.icon" type="idref" value="checkOff"/>
+    <property key="RadioButton.icon" type="idref" value="radioOff"/>
+    <property key="CheckBox.textIconGap" type="integer" value="6"/>
+    <state>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+    </state>
+    <state value="SELECTED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+      <property key="CheckBox.icon" type="idref" value="checkOn"/>
+      <property key="RadioButton.icon" type="idref" value="radioOn"/>
+    </state>
+    <state value="DISABLED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#9AA3AF"/>
+    </state>
+    <state value="SELECTED AND DISABLED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#9AA3AF"/>
+      <property key="CheckBox.icon" type="idref" value="checkOn"/>
+      <property key="RadioButton.icon" type="idref" value="radioOn"/>
+    </state>
+  </style>
+  <bind style="check" type="region" key="CheckBox"/>
+  <bind style="check" type="region" key="RadioButton"/>
+
+  <style id="field" clone="default">
+    <opaque value="false"/>
+    <insets top="4" left="6" bottom="4" right="6"/>
+    <imagePainter method="textFieldBackground" path="/showcase/laf/synth/field.png" sourceInsets="3 3 3 3"/>
+    <imagePainter method="passwordFieldBackground" path="/showcase/laf/synth/field.png" sourceInsets="3 3 3 3"/>
+    <imagePainter method="formattedTextFieldBackground" path="/showcase/laf/synth/field.png" sourceInsets="3 3 3 3"/>
+    <imagePainter method="comboBoxBackground" path="/showcase/laf/synth/button.png" sourceInsets="8 8 8 8"/>
+    <inputMap id="fieldKeys">
+      <bindKey key="ctrl A" action="select-all"/>
+      <bindKey key="ctrl C" action="copy-to-clipboard"/>
+      <bindKey key="ctrl V" action="paste-from-clipboard"/>
+      <bindKey key="ctrl X" action="cut-to-clipboard"/>
+      <bindKey key="LEFT" action="caret-backward"/>
+      <bindKey key="RIGHT" action="caret-forward"/>
+      <bindKey key="HOME" action="caret-begin-line"/>
+      <bindKey key="END" action="caret-end-line"/>
+      <bindKey key="BACK_SPACE" action="delete-previous"/>
+      <bindKey key="DELETE" action="delete-next"/>
+    </inputMap>
+    <property key="TextField.focusInputMap" type="idref" value="fieldKeys"/>
+    <property key="PasswordField.focusInputMap" type="idref" value="fieldKeys"/>
+    <property key="FormattedTextField.focusInputMap" type="idref" value="fieldKeys"/>
+  </style>
+  <bind style="field" type="region" key="TextField"/>
+  <bind style="field" type="region" key="PasswordField"/>
+  <bind style="field" type="region" key="FormattedTextField"/>
+  <bind style="field" type="region" key="ComboBox"/>
+
+  <style id="content" clone="default">
+    <state>
+      <color type="BACKGROUND" value="#FFFFFF"/>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+      <color type="TEXT_BACKGROUND" value="#FFFFFF"/>
+    </state>
+    <state value="SELECTED">
+      <color type="TEXT_BACKGROUND" value="#3F72AF"/>
+      <color type="TEXT_FOREGROUND" value="#FFFFFF"/>
+    </state>
+    <property key="Table.gridColor" type="idref" value="gridColor"/>
+    <property key="Tree.expandedIcon" type="idref" value="expanded"/>
+    <property key="Tree.collapsedIcon" type="idref" value="collapsed"/>
+    <property key="Tree.rowHeight" type="integer" value="18"/>
+    <property key="Tree.leftChildIndent" type="integer" value="8"/>
+    <property key="Tree.rightChildIndent" type="integer" value="12"/>
+    <property key="Table.rowHeight" type="integer" value="18"/>
+  </style>
+  <bind style="content" type="region" key="TextArea"/>
+  <bind style="content" type="region" key="EditorPane"/>
+  <bind style="content" type="region" key="TextPane"/>
+  <bind style="content" type="region" key="List"/>
+  <bind style="content" type="region" key="Tree"/>
+  <bind style="content" type="region" key="Table"/>
+  <bind style="content" type="region" key="Viewport"/>
+  <style id="treeCell">
+    <state value="SELECTED">
+      <!-- a painter of a state : the selected tree rows -->
+      <painter idref="painter" method="treeCellBackground"/>
+    </state>
+  </style>
+  <bind style="treeCell" type="region" key="TreeCell"/>
+  <!-- the tree cell renderer (a label named "Tree.cellRenderer") : transparent on the selected row background -->
+  <style id="treeRenderer">
+    <opaque value="false"/>
+  </style>
+  <bind style="treeRenderer" type="name" key="Tree.cellRenderer"/>
+
+  <style id="scrollPane" clone="default">
+    <insets top="1" left="1" bottom="1" right="1"/>
+    <painter idref="painter" method="scrollPaneBorder"/>
+  </style>
+  <bind style="scrollPane" type="region" key="ScrollPane"/>
+
+  <style id="scrollBar" clone="default">
+    <property key="ScrollBar.thumbHeight" type="integer" value="14"/>
+    <property key="ScrollBar.minimumThumbSize" type="dimension" value="14 14"/>
+  </style>
+  <bind style="scrollBar" type="region" key="ScrollBar"/>
+  <style id="thumb">
+    <imagePainter method="scrollBarThumbBackground" path="/showcase/laf/synth/scroll-thumb.png"
+                  sourceInsets="5 5 5 5"/>
+  </style>
+  <bind style="thumb" type="region" key="ScrollBarThumb"/>
+  <style id="track">
+    <imagePainter method="scrollBarTrackBackground" path="/showcase/laf/synth/scroll-track.png"
+                  sourceInsets="2 2 2 2"/>
+  </style>
+  <bind style="track" type="region" key="ScrollBarTrack"/>
+
+  <style id="arrow" clone="default">
+    <opaque value="false"/>
+    <property key="ArrowButton.size" type="integer" value="14"/>
+    <painter idref="painter" method="arrowButtonForeground"/>
+  </style>
+  <bind style="arrow" type="region" key="ArrowButton"/>
+
+  <style id="slider" clone="default">
+    <property key="Slider.thumbWidth" type="integer" value="14"/>
+    <property key="Slider.thumbHeight" type="integer" value="14"/>
+    <property key="Slider.paintValue" type="boolean" value="true"/>
+  </style>
+  <bind style="slider" type="region" key="Slider"/>
+  <style id="sliderParts">
+    <painter idref="painter" method="sliderTrackBackground"/>
+    <painter idref="painter" method="sliderThumbBackground"/>
+  </style>
+  <bind style="sliderParts" type="region" key="SliderTrack"/>
+  <bind style="sliderParts" type="region" key="SliderThumb"/>
+
+  <style id="tab" clone="default">
+    <opaque value="false"/>
+    <insets top="3" left="10" bottom="3" right="10"/>
+    <imagePainter method="tabbedPaneTabBackground" path="/showcase/laf/synth/tab.png" sourceInsets="6 6 2 6"/>
+    <state value="SELECTED">
+      <font idref="bold"/>
+      <color type="TEXT_FOREGROUND" value="#3F72AF"/>
+      <imagePainter method="tabbedPaneTabBackground" path="/showcase/laf/synth/tab-selected.png"
+                    sourceInsets="6 6 2 6"/>
+    </state>
+  </style>
+  <bind style="tab" type="region" key="TabbedPaneTab"/>
+  <style id="tabContent">
+    <insets top="2" left="2" bottom="2" right="2"/>
+    <painter idref="painter" method="tabbedPaneContentBorder"/>
+  </style>
+  <bind style="tabContent" type="region" key="TabbedPaneContent"/>
+
+  <!-- bound by component name : the table header renderer is named "TableHeader.renderer" -->
+  <style id="header" clone="default">
+    <font idref="bold"/>
+    <insets top="2" left="6" bottom="2" right="6"/>
+    <imagePainter method="labelBackground" path="/showcase/laf/synth/header.png" sourceInsets="2 2 2 2"/>
+  </style>
+  <bind style="header" type="name" key="TableHeader.renderer"/>
+
+  <style id="frame" clone="default">
+    <insets top="2" left="2" bottom="2" right="2"/>
+    <painter idref="painter" method="internalFrameBorder"/>
+  </style>
+  <bind style="frame" type="region" key="InternalFrame"/>
+  <style id="titlePane" clone="default">
+    <font idref="bold"/>
+    <state>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#FFFFFF"/>
+    </state>
+    <insets top="3" left="6" bottom="3" right="4"/>
+    <property key="InternalFrameTitlePane.closeIcon" type="idref" value="closeIcon"/>
+    <property key="InternalFrameTitlePane.maximizeIcon" type="idref" value="maximizeIcon"/>
+    <property key="InternalFrameTitlePane.iconifyIcon" type="idref" value="iconifyIcon"/>
+    <property key="InternalFrameTitlePane.minimizeIcon" type="idref" value="maximizeIcon"/>
+    <painter idref="painter" method="internalFrameTitlePaneBackground"/>
+  </style>
+  <bind style="titlePane" type="region" key="InternalFrameTitlePane"/>
+  <style id="titleButtons">
+    <opaque value="false"/>
+    <painter idref="painter" method="buttonBackground"/>
+  </style>
+  <bind style="titleButtons" type="name" key="InternalFrameTitlePane.*Button"/>
+  <style id="desktop" clone="default">
+    <painter idref="painter" method="desktopPaneBackground"/>
+  </style>
+  <bind style="desktop" type="region" key="DesktopPane"/>
+
+  <style id="bar" clone="default">
+    <insets top="2" left="2" bottom="2" right="2"/>
+    <painter idref="painter" method="menuBarBackground"/>
+    <painter idref="painter" method="toolBarBackground"/>
+  </style>
+  <bind style="bar" type="region" key="MenuBar"/>
+  <bind style="bar" type="region" key="ToolBar"/>
+
+  <style id="menu" clone="default">
+    <opaque value="false"/>
+    <insets top="3" left="8" bottom="3" right="8"/>
+    <property key="Menu.arrowIcon" type="idref" value="menuArrow"/>
+    <property key="CheckBoxMenuItem.checkIcon" type="idref" value="checkOff"/>
+    <property key="RadioButtonMenuItem.checkIcon" type="idref" value="radioOff"/>
+    <painter idref="painter" method="menuItemBackground"/>
+    <state>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+    </state>
+    <state value="DISABLED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#9AA3AF"/>
+    </state>
+    <state value="SELECTED">
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1F2937"/>
+      <property key="CheckBoxMenuItem.checkIcon" type="idref" value="checkOn"/>
+      <property key="RadioButtonMenuItem.checkIcon" type="idref" value="radioOn"/>
+    </state>
+  </style>
+  <bind style="menu" type="region" key="Menu"/>
+  <bind style="menu" type="region" key="MenuItem"/>
+  <bind style="menu" type="region" key="CheckBoxMenuItem"/>
+  <bind style="menu" type="region" key="RadioButtonMenuItem"/>
+  <style id="accelerator">
+    <font name="Dialog" size="10"/>
+    <state>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#6B7280"/>
+    </state>
+  </style>
+  <bind style="accelerator" type="region" key="MenuItemAccelerator"/>
+
+  <style id="popup" clone="default">
+    <state>
+      <color type="BACKGROUND" value="#FFFFFF"/>
+    </state>
+    <insets top="2" left="2" bottom="2" right="2"/>
+    <painter idref="painter" method="popupMenuBorder"/>
+  </style>
+  <bind style="popup" type="region" key="PopupMenu"/>
+
+  <style id="separator">
+    <insets top="2" left="0" bottom="2" right="0"/>
+    <property key="Separator.thickness" type="integer" value="1"/>
+    <painter idref="painter" method="separatorForeground"/>
+  </style>
+  <bind style="separator" type="region" key="Separator"/>
+  <bind style="separator" type="region" key="PopupMenuSeparator"/>
+  <bind style="separator" type="region" key="ToolBarSeparator"/>
+
+  <style id="divider">
+    <property key="SplitPane.size" type="integer" value="8"/>
+    <painter idref="painter" method="splitPaneDividerBackground"/>
+  </style>
+  <bind style="divider" type="region" key="SplitPaneDivider"/>
+  <bind style="divider" type="region" key="SplitPane"/>
+
+  <style id="toolTip" clone="default">
+    <opaque value="false"/>
+    <insets top="3" left="8" bottom="3" right="8"/>
+    <painter idref="painter" method="toolTipBackground"/>
+  </style>
+  <bind style="toolTip" type="region" key="ToolTip"/>
+
+  <style id="optionPane" clone="default">
+    <property key="OptionPane.questionIcon" type="idref" value="questionIcon"/>
+  </style>
+  <bind style="optionPane" type="region" key="OptionPane"/>
+</synth>

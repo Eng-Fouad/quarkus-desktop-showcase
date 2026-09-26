@@ -6,6 +6,7 @@ import java.awt.Component;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
@@ -13,6 +14,8 @@ import java.awt.geom.Arc2D;
 import java.awt.geom.Area;
 import java.awt.geom.CubicCurve2D;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.FlatteningPathIterator;
+import java.awt.geom.GeneralPath;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
@@ -37,8 +40,10 @@ import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
- * The shapes of {@code java.awt.geom} : lines, rectangles, ellipses, arcs, curves, polygons, paths with both winding
- * rules, constructive area geometry, flattening and transformed shapes.
+ * The shapes of {@code java.awt.geom} : lines, rectangles, ellipses, arcs (negative and over 360 degree extents),
+ * curves (subdivision, equation solvers), polygons, paths with both winding rules ({@code GeneralPath},
+ * {@code Path2D.append}), constructive area geometry (curved holes, transformed areas), {@code Rectangle} integer
+ * operations, flattening (recursion limits), containment and intersection tests, and transformed shapes.
  * <p>
  * Capture method C : the tiles are drawn with Java2D into a {@code TYPE_INT_ARGB} image (software loops and the Marlin
  * renderer, no on-screen pipeline), shown as is. Checks : geometry computations (bounds, containment, segment counts,
@@ -262,7 +267,167 @@ public class ShapesPage implements FeaturePage {
                     tx.shear(0.3, 0);
                     tx.translate(-35, -25);
                     fillAndDraw(g, tx.createTransformedShape(new Rectangle2D.Double(0, 0, 70, 50)));
+                }),
+                new Tile("GeneralPath (legacy)", g -> fillAndDraw(g, heart())),
+                new Tile("Path2D.append connect / not", g -> {
+                    g.setColor(new Color(INK, true));
+                    g.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g.draw(appended(true, 0));
+                    g.draw(appended(false, 55));
+                    points(g, 0xE53935, 50, 10, 60, 45, 50, 65, 60, 100);
+                }),
+                new Tile("Area with curved holes", g -> fillAndDraw(g, face())),
+                new Tile("Rectangle union / intersection", g -> {
+                    Rectangle r1 = new Rectangle(10, 10, 60, 50);
+                    Rectangle r2 = new Rectangle(40, 35, 60, 60);
+                    g.fill(r1.intersection(r2));
+                    g.setColor(new Color(INK, true));
+                    g.draw(r1);
+                    g.draw(r2);
+                    g.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, new float[] { 4, 3 },
+                            0));
+                    g.draw(r1.union(r2));
+                }),
+                new Tile("FlatteningPathIterator limit 1 / 10", g -> {
+                    CubicCurve2D curve = wave();
+                    Path2D coarse = new Path2D.Double();
+                    coarse.append(new FlatteningPathIterator(curve.getPathIterator(null), 0.1, 1), false);
+                    g.setStroke(new BasicStroke(3f));
+                    g.draw(coarse);
+                    Path2D fine = new Path2D.Double();
+                    fine.append(new FlatteningPathIterator(curve.getPathIterator(null), 0.1, 10), false);
+                    g.setColor(new Color(INK, true));
+                    g.setStroke(new BasicStroke(1f));
+                    g.draw(fine);
+                    double[] coords = new double[6];
+                    for (PathIterator it = coarse.getPathIterator(null); !it.isDone(); it.next()) {
+                        it.currentSegment(coords);
+                        points(g, 0xE53935, coords[0], coords[1]);
+                    }
+                }),
+                new Tile("Area.createTransformedArea", g -> {
+                    Area area = circle();
+                    area.add(square());
+                    fillAndDraw(g, area.createTransformedArea(rotation()));
+                }),
+                new Tile("contains / intersects grid", g -> {
+                    Ellipse2D ellipse = new Ellipse2D.Double(5, 15, 100, 80);
+                    for (int y = 1; y < 109; y += 12) {
+                        for (int x = 1; x < 109; x += 12) {
+                            g.setColor(new Color(ellipse.contains(x, y, 12, 12) ? 0xFF81C784
+                                    : ellipse.intersects(x, y, 12, 12) ? 0xFFFFE082 : 0xFFECEFF1, true));
+                            g.fillRect(x, y, 11, 11);
+                        }
+                    }
+                    g.setColor(new Color(INK, true));
+                    g.draw(ellipse);
+                }),
+                new Tile("Line2D.relativeCCW", g -> {
+                    Line2D line = new Line2D.Double(10, 90, 100, 20);
+                    for (int y = 5; y < 110; y += 10) {
+                        for (int x = 5; x < 110; x += 10) {
+                            int ccw = line.relativeCCW(x, y);
+                            points(g, ccw < 0 ? 0xE53935 : ccw > 0 ? 0x1E88E5 : INK, x, y);
+                        }
+                    }
+                    g.setColor(new Color(INK, true));
+                    g.setStroke(new BasicStroke(2f));
+                    g.draw(line);
+                }),
+                new Tile("RoundRectangle2D arc sizes", g -> {
+                    double[][] arcs = { { 0, 0 }, { 20, 10 }, { 40, 40 }, { 50, 50 } };
+                    for (int i = 0; i < arcs.length; i++) {
+                        fillAndDraw(g, new RoundRectangle2D.Double(3 + (i % 2) * 56, 3 + (i / 2) * 56, 48, 48, arcs[i][0],
+                                arcs[i][1]));
+                    }
+                }),
+                new Tile("Arc2D extents -90, 450, -300", g -> {
+                    fillAndDraw(g, new Arc2D.Double(0, 0, 60, 60, 0, -90, Arc2D.PIE));
+                    Color fill = g.getColor();
+                    g.setColor(new Color(INK, true));
+                    g.setStroke(new BasicStroke(3f));
+                    g.draw(new Arc2D.Double(55, 5, 50, 50, 30, 450, Arc2D.OPEN));
+                    g.setColor(fill);
+                    fillAndDraw(g, new Arc2D.Double(20, 50, 70, 58, 200, -300, Arc2D.CHORD));
+                }),
+                new Tile("CubicCurve2D.subdivide", g -> {
+                    CubicCurve2D left = new CubicCurve2D.Double();
+                    CubicCurve2D right = new CubicCurve2D.Double();
+                    wave().subdivide(left, right);
+                    g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g.draw(left);
+                    g.setColor(new Color(INK, true));
+                    g.draw(right);
+                    g.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, new float[] { 3, 3 },
+                            0));
+                    for (CubicCurve2D c : new CubicCurve2D[] { left, right }) {
+                        Path2D polygon = new Path2D.Double();
+                        polygon.moveTo(c.getX1(), c.getY1());
+                        polygon.lineTo(c.getCtrlX1(), c.getCtrlY1());
+                        polygon.lineTo(c.getCtrlX2(), c.getCtrlY2());
+                        polygon.lineTo(c.getX2(), c.getY2());
+                        g.draw(polygon);
+                    }
+                    points(g, 0xE53935, left.getX2(), left.getY2());
+                }),
+                new Tile("QuadCurve2D.subdivide", g -> {
+                    QuadCurve2D quad = new QuadCurve2D.Double(5, 100, 55, -40, 105, 100);
+                    QuadCurve2D left = new QuadCurve2D.Double();
+                    QuadCurve2D right = new QuadCurve2D.Double();
+                    quad.subdivide(left, right);
+                    g.setStroke(new BasicStroke(4f));
+                    g.draw(left);
+                    g.setColor(new Color(INK, true));
+                    g.draw(right);
+                    Path2D copy = new Path2D.Double(quad);
+                    copy.transform(AffineTransform.getScaleInstance(0.5, 0.5));
+                    copy.transform(AffineTransform.getTranslateInstance(28, 50));
+                    g.setStroke(new BasicStroke(1.5f));
+                    g.draw(copy);
                 }));
+    }
+
+    /** Rotation by 45 degrees and scale 0.8 around (55, 55). */
+    private static AffineTransform rotation() {
+        AffineTransform tx = AffineTransform.getTranslateInstance(55, 55);
+        tx.scale(0.8, 0.8);
+        tx.rotate(Math.toRadians(45));
+        tx.translate(-55, -55);
+        return tx;
+    }
+
+    /** A heart with a hole (even-odd rule). */
+    private static GeneralPath heart() {
+        GeneralPath path = new GeneralPath(Path2D.WIND_EVEN_ODD);
+        path.moveTo(55, 104);
+        path.curveTo(-12, 52, 18, -8, 55, 30);
+        path.curveTo(92, -8, 122, 52, 55, 104);
+        path.closePath();
+        path.moveTo(40, 40);
+        path.quadTo(55, 20, 70, 40);
+        path.quadTo(55, 60, 40, 40);
+        path.closePath();
+        return path;
+    }
+
+    private static Path2D appended(boolean connect, double dy) {
+        Path2D.Double path = new Path2D.Double();
+        path.moveTo(5, 10 + dy);
+        path.lineTo(50, 10 + dy);
+        path.append(new Line2D.Double(60, 45 + dy, 105, 10 + dy), connect);
+        return path;
+    }
+
+    private static Area face() {
+        Area face = new Area(new Ellipse2D.Double(5, 5, 100, 100));
+        face.subtract(new Area(new Ellipse2D.Double(28, 30, 18, 22)));
+        face.subtract(new Area(new Ellipse2D.Double(64, 30, 18, 22)));
+        face.subtract(new Area(new Arc2D.Double(25, 35, 60, 50, 200, 140, Arc2D.CHORD)));
+        return face;
+    }
+
+    private static CubicCurve2D wave() {
+        return new CubicCurve2D.Double(5, 100, 25, -20, 85, 130, 105, 10);
     }
 
     private static List<Check> geometryChecks() {
@@ -333,7 +498,93 @@ public class ShapesPage implements FeaturePage {
         checks.add(Checks.expect("BasicStroke.createStrokedShape : bounds", "-2.00,-2.00 104.00x4.00",
                 () -> Checks.bounds(new BasicStroke(4, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_MITER)
                         .createStrokedShape(new Line2D.Double(0, 0, 100, 0)))));
+        checks.add(Checks.expect("GeneralPath : a Path2D.Float, default winding rule, hole", "true, WIND_NON_ZERO, false",
+                () -> (heart() instanceof Path2D.Float) + ", "
+                        + (new GeneralPath().getWindingRule() == Path2D.WIND_NON_ZERO ? "WIND_NON_ZERO" : "WIND_EVEN_ODD")
+                        + ", " + heart().contains(55, 40)));
+        checks.add(Checks.expect("Path2D.append connect / not : segments",
+                "MOVETO LINETO LINETO LINETO / MOVETO LINETO MOVETO LINETO",
+                () -> segments(appended(true, 0).getPathIterator(null)) + " / "
+                        + segments(appended(false, 0).getPathIterator(null))));
+        checks.add(Checks.expect("Area with curved holes : singular / polygonal / rectangular", "false / false / false",
+                () -> face().isSingular() + " / " + face().isPolygonal() + " / " + face().isRectangular()));
+        checks.add(Checks.expect("Area with curved holes : contains an eye center / the cheek", "false / true",
+                () -> face().contains(37, 41) + " / " + face().contains(20, 60)));
+        checks.add(Checks.expect("Rectangle union / intersection / intersects", "10,10 90x85 / 40,35 30x25 / true", () -> {
+            Rectangle r1 = new Rectangle(10, 10, 60, 50);
+            Rectangle r2 = new Rectangle(40, 35, 60, 60);
+            return rect(r1.union(r2)) + " / " + rect(r1.intersection(r2)) + " / " + r1.intersects(r2);
+        }));
+        checks.add(Checks.expect("Rectangle intersection of disjoint rectangles : bounds, isEmpty", "30,0 -10x10, true",
+                () -> {
+                    Rectangle r = new Rectangle(0, 0, 20, 10).intersection(new Rectangle(30, 0, 20, 10));
+                    return rect(r) + ", " + r.isEmpty();
+                }));
+        checks.add(Checks.expect("Rectangle.add(point) / grow(2, 3)", "0,0 50x30 / -2,-3 24x16", () -> {
+            Rectangle a = new Rectangle(0, 0, 20, 10);
+            a.add(new java.awt.Point(50, 30));
+            Rectangle b = new Rectangle(0, 0, 20, 10);
+            b.grow(2, 3);
+            return rect(a) + " / " + rect(b);
+        }));
+        checks.add(Checks.expect("FlatteningPathIterator(flatness 0.1) limit 1 / 10 : segments", "3 / 45", () ->
+                count(new FlatteningPathIterator(wave().getPathIterator(null), 0.1, 1)) + " / "
+                        + count(new FlatteningPathIterator(wave().getPathIterator(null), 0.1, 10))));
+        checks.add(Checks.expect("Area.createTransformedArea(rotate 45, scale 0.8) : bounds", "21.06,15.69 67.88x90.23", () -> {
+            Area area = circle();
+            area.add(square());
+            return Checks.bounds(area.createTransformedArea(rotation()));
+        }));
+        checks.add(Checks.expect("Ellipse2D contains / intersects 12 px cells (of 81)", "31 / 59", () -> {
+            Ellipse2D ellipse = new Ellipse2D.Double(5, 15, 100, 80);
+            int contains = 0;
+            int intersects = 0;
+            for (int y = 1; y < 109; y += 12) {
+                for (int x = 1; x < 109; x += 12) {
+                    contains += ellipse.contains(x, y, 12, 12) ? 1 : 0;
+                    intersects += ellipse.intersects(x, y, 12, 12) ? 1 : 0;
+                }
+            }
+            return contains + " / " + intersects;
+        }));
+        checks.add(Checks.expect("Line2D(10, 90, 100, 20).relativeCCW (10, 20) / (55, 55) / (100, 90)", "1 / 0 / -1",
+                () -> {
+                    Line2D line = new Line2D.Double(10, 90, 100, 20);
+                    return line.relativeCCW(10, 20) + " / " + line.relativeCCW(55, 55) + " / " + line.relativeCCW(100, 90);
+                }));
+        checks.add(Checks.expect("Arc2D extent -90 / 450 : extent, containsAngle(315 / 45)",
+                "-90.0 true / 450.0 true", () -> {
+            Arc2D a = new Arc2D.Double(0, 0, 60, 60, 0, -90, Arc2D.PIE);
+            Arc2D b = new Arc2D.Double(55, 5, 50, 50, 30, 450, Arc2D.OPEN);
+            return Checks.num(a.getAngleExtent(), 1) + " " + a.containsAngle(315) + " / " + Checks.num(b.getAngleExtent(), 1)
+                    + " " + b.containsAngle(45);
+        }));
+        checks.add(Checks.expect("CubicCurve2D.subdivide : split point / halves meet", "55.00,55.00 / true", () -> {
+            CubicCurve2D left = new CubicCurve2D.Double();
+            CubicCurve2D right = new CubicCurve2D.Double();
+            wave().subdivide(left, right);
+            return point(left.getP2()) + " / " + left.getP2().equals(right.getP1());
+        }));
+        checks.add(Checks.expect("QuadCurve2D.solveQuadratic(x^2 - 5x + 6)", "2.000000 3.000000", () -> {
+            double[] eqn = { 6, -5, 1 };
+            int n = QuadCurve2D.solveQuadratic(eqn);
+            double[] roots = Arrays.copyOf(eqn, n);
+            Arrays.sort(roots);
+            return String.join(" ", Arrays.stream(roots).mapToObj(r -> Checks.num(r, 6)).toList());
+        }));
+        checks.add(Checks.expect("Point2D.distance((0, 0), (3, 4)) / Line2D.ptLineDist", "5.000 / 0.000",
+                () -> Checks.num(Point2D.distance(0, 0, 3, 4)) + " / "
+                        + Checks.num(new Line2D.Double(10, 90, 100, 20).ptLineDist(55, 55))));
+        checks.add(Checks.expect("Dimension.setSize(2.5, 3.5) (ceil)", "3x4", () -> {
+            java.awt.Dimension d = new java.awt.Dimension();
+            d.setSize(2.5, 3.5);
+            return d.width + "x" + d.height;
+        }));
         return checks;
+    }
+
+    private static String rect(Rectangle r) {
+        return r.x + "," + r.y + " " + r.width + "x" + r.height;
     }
 
     private static String point(Point2D p) {

@@ -3,6 +3,8 @@
 mvnw text eol=lf
 *.sh text eol=lf
 docker/linux/xvfb-exec text eol=lf
+# Test assets of the pages are used byte for byte (hashes, sizes, offsets): never convert their line endings
+src/main/resources/showcase/** -text
 # Binary test assets of the pages (never converted, never diffed as text)
 *.png binary
 *.jpg binary
@@ -29,3 +31,4 @@ docker/linux/xvfb-exec text eol=lf
 *.jar binary
 *.ser binary
 *.rtf -text
+*.xbm -text

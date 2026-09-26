@@ -1,0 +1,7 @@
+{
+  "resources": [
+    { "glob": "META-INF/services/javax.imageio.spi.ImageReaderSpi" },
+    { "glob": "META-INF/services/javax.imageio.spi.ImageWriterSpi" },
+    { "bundle": "showcase.text-images.ShowcaseMetadataFormatResources" }
+  ]
+}

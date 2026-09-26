@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Input of java.beans.XMLDecoder using every element of its syntax (read by the beans-xml-persistence page) -->
+<java version="25" class="java.beans.XMLDecoder">
+ <object class="java.util.ArrayList" id="list">
+  <!-- values -->
+  <void method="add"><string>text &amp; &lt;markup&gt;</string></void>
+  <void method="add"><int>42</int></void>
+  <void method="add"><long>9000000000</long></void>
+  <void method="add"><short>7</short></void>
+  <void method="add"><byte>-3</byte></void>
+  <void method="add"><float>1.5</float></void>
+  <void method="add"><double>2.25</double></void>
+  <void method="add"><char>Q</char></void>
+  <void method="add"><char code="#41"/></void>
+  <void method="add"><boolean>true</boolean></void>
+  <void method="add"><true/></void>
+  <void method="add"><false/></void>
+  <void method="add"><null/></void>
+  <void method="add"><class>java.awt.Point</class></void>
+  <!-- static fields, constructors and static methods -->
+  <void method="add"><object class="java.awt.Color" field="ORANGE"/></void>
+  <void method="add"><field class="java.awt.Font" name="BOLD"/></void>
+  <void method="add"><new class="java.awt.Point"><int>3</int><int>4</int></new></void>
+  <void method="add"><object class="java.awt.Dimension"><int>30</int><int>20</int></object></void>
+  <void method="add"><object class="java.lang.Integer" method="valueOf"><string>77</string></object></void>
+  <void method="add"><method class="java.lang.Math" name="max"><int>5</int><int>9</int></method></void>
+  <!-- properties, instance fields, arrays -->
+  <void method="add">
+   <object class="java.awt.Rectangle">
+    <void property="location"><new class="java.awt.Point"><int>5</int><int>6</int></new></void>
+    <property name="size"><object class="java.awt.Dimension"><int>30</int><int>20</int></object></property>
+    <field name="x"><int>7</int></field>
+   </object>
+  </void>
+  <void method="add">
+   <array class="int" length="3">
+    <void index="0"><int>1</int></void>
+    <void index="2"><int>3</int></void>
+   </array>
+  </void>
+  <void method="add">
+   <array class="java.lang.String"><string>a</string><string>b</string></array>
+  </void>
+  <!-- an application bean (indexed setter), then references to it and to one of its property values -->
+  <void method="add">
+   <object class="io.quarkiverse.desktop.showcase.pages.beans.PrintJobBean" id="job">
+    <void property="title"><string>From XML</string></void>
+    <void method="setPages"><int>1</int><int>8</int></void>
+    <void property="orientation">
+     <object class="io.quarkiverse.desktop.showcase.pages.beans.PrintJobBean$Orientation" field="LANDSCAPE"/>
+    </void>
+   </object>
+  </void>
+  <void method="add"><object idref="job"/></void>
+  <void method="add"><var idref="job"/></void>
+  <void idref="job"><void property="summary" id="summary"/></void>
+  <void method="add"><var idref="summary"/></void>
+  <void method="add"><var idref="list"/></void>
+ </object>
+ <!-- statements on the decoder : its owner -->
+ <void property="owner">
+  <void property="title"><string>set through the decoder owner</string></void>
+ </void>
+</java>

@@ -1,0 +1,54 @@
+<html>
+<head>
+<title>Quarkus Desktop HTML</title>
+<link rel="stylesheet" type="text/css" href="style.css">
+<style type="text/css">
+.note { background-color: #FFF8E1; color: #5D4037; border: 1px solid #FFB300; padding: 4px; margin-top: 6px; margin-bottom: 6px; }
+td.num { text-align: right; font-family: Monospaced; }
+</style>
+</head>
+<body>
+<h1 id="top">HTMLEditorKit <span class="tag">&nbsp;HTML 3.2 + CSS&nbsp;</span></h1>
+<p id="intro">Loaded with <code>JEditorPane.setPage(URL)</code> from a classpath resource, styled by a linked
+<b>style.css</b> and an inline <code>&lt;style&gt;</code> block: <b>bold</b>, <i>italic</i>, <u>underline</u>,
+<s>strike</s>, H<sub>2</sub>O, E = mc<sup>2</sup>, <font color="#C62828" size="+1">font color size</font>,
+<font face="Monospaced">font face</font>, <big>big</big>, <small>small</small>, entities &amp; &copy; &eacute; &#8364; &lt;tag&gt;.</p>
+<div class="note">A <code>div</code> with a background color, a border and padding (CSS rules of an inline style sheet).</div>
+<table border="1" cellpadding="4" cellspacing="0" width="100%">
+<tr><th align="left">Image</th><th>Format</th><th>Toolkit decoder</th><th align="right">Size</th></tr>
+<tr><td><img src="images/logo.png" width="64" height="64" alt="logo"></td><td>PNG</td><td>sun.awt.image.PNGImageDecoder (Java)</td><td class="num">64 x 64</td></tr>
+<tr><td><img src="images/photo.jpg" alt="photo"></td><td>JPEG</td><td>sun.awt.image.JPEGImageDecoder (libjpeg, JNI callbacks)</td><td class="num">160 x 100</td></tr>
+<tr><td><img src="images/badge.gif" alt="badge"></td><td>GIF</td><td>sun.awt.image.GifImageDecoder (JNI)</td><td class="num">88 x 31</td></tr>
+<tr><td><img src="images/missing.png" alt="missing" width="32" height="32"></td><td colspan="2">A missing image : the html.missingImage icon of the look and feel.</td><td class="num">-</td></tr>
+</table>
+<h2>Lists</h2>
+<table width="100%"><tr valign="top">
+<td><ul><li>disc item</li><li>second<ul><li>nested item</li></ul></li></ul></td>
+<td><ol type="1"><li>one</li><li>two</li></ol></td>
+<td><ol type="a"><li>alpha</li><li>beta</li></ol></td>
+<td><ol type="I"><li>roman</li><li>numerals</li></ol></td>
+<td><dl><dt>Term</dt><dd>Definition</dd></dl></td>
+</tr></table>
+<blockquote>A blockquote, then preformatted text :</blockquote>
+<pre>for (Element e : document) {
+    render(e);
+}</pre>
+<hr>
+<h2>Form</h2>
+<form action="submit" method="get">
+<table>
+<tr><td>Name</td><td><input type="text" name="name" value="Ada Lovelace" size="20"></td>
+<td>Password</td><td><input type="password" name="password" value="secret" size="10"></td></tr>
+<tr><td>Options</td><td><input type="checkbox" name="news" checked> News <input type="checkbox" name="offers"> Offers</td>
+<td>Size</td><td><input type="radio" name="size" value="s"> S <input type="radio" name="size" value="m" checked> M <input type="radio" name="size" value="l"> L</td></tr>
+<tr><td>Language</td><td><select name="lang"><option value="java" selected>Java</option><option value="kotlin">Kotlin</option><option value="scala">Scala</option></select></td>
+<td>Tags</td><td><select name="tags" multiple size="3"><option selected>awt</option><option>swing</option><option selected>native</option></select></td></tr>
+<tr><td>Comment</td><td colspan="3"><textarea name="comment" rows="2" cols="40">Hello from a textarea</textarea></td></tr>
+<tr><td></td><td colspan="3"><input type="submit" value="Send"> <input type="reset" value="Reset"><input type="hidden" name="token" value="42"></td></tr>
+</table>
+</form>
+<p>Links : <a href="details.html#part2">relative link</a> and <a href="https://quarkus.io/">external link</a>.
+An object tag : ObjectView creates the classid by reflection and sets its parameters as bean properties :
+<object classid="javax.swing.JButton"><param name="text" value="ObjectView JButton"></object></p>
+</body>
+</html>

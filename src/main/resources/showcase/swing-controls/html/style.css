@@ -1,0 +1,10 @@
+/* Linked style sheet of showcase.html (loaded through StyleSheet.importStyleSheet(URL)) */
+body { font-family: SansSerif; font-size: 12pt; color: #222222; margin-left: 6px; margin-right: 6px; }
+h1 { color: #1B3A6B; font-size: 18pt; margin-top: 4px; margin-bottom: 6px; border-bottom: 2px solid #4695EB; }
+h2 { color: #1565C0; font-size: 14pt; margin-top: 8px; margin-bottom: 4px; }
+.tag { color: #FFFFFF; background-color: #4695EB; font-size: 10pt; }
+th { background-color: #E3F2FD; color: #0D47A1; }
+code { font-family: Monospaced; color: #6A1B9A; }
+pre { background-color: #ECEFF1; margin-left: 20px; }
+blockquote { font-style: italic; color: #555555; }
+a { color: #1565C0; }

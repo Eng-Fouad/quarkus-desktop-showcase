@@ -99,6 +99,12 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
 - does **not** set `quarkus.native.headless` (it only configures the image builder JVM: whether an executable is headless
   is decided at run time by the JDK) and has no `java.home` feature (AWT reads `java.home`: quarkus-desktop handles it);
 - includes its resources: `quarkus.native.resources.includes=showcase/**`;
+- includes the JDK resource bundles and locale data of the locales its i18n checks use (`quarkus.locales`; by default a
+  native executable only has those of the build locale);
+- registers what the JDK reaches by reflection in its own classes: `@RegisterForReflection` on JavaBeans, BeanInfos,
+  property editors, look and feels and UI delegates created by name, formatter value classes, serializable clipboard
+  payloads, and the service providers of its ImageIO plugin, whose `META-INF/services` files and metadata format bundle
+  are listed in `META-INF/native-image/io.quarkiverse.desktop.showcase/quarkus-desktop-showcase/reachability-metadata.json`;
 - never creates AWT or Swing objects in the static initializer of a class that is not itself an AWT/Swing subclass
   (Quarkus initializes application classes at build time, AWT and Swing classes at run time).
 
@@ -176,3 +182,79 @@ public class ShapesPage implements FeaturePage {
 Each page is a class of `src/main/java/io/quarkiverse/desktop/showcase/pages/<group>`. The catalogue follows the
 feature surface of the JDK desktop modules: Overview, AWT, Java2D, Text & Fonts, Images & Color, Swing Components,
 Look & Feel, Data Transfer & Desktop, Printing, Accessibility & Beans, Sound.
+
+67 pages with 3753 checks in the default variant, 36 pages in the awt-only variant. Classes are
+relative to `io.quarkiverse.desktop.showcase`. *Checks*: number of checks of a Windows JVM run (some pages have
+platform-specific checks). *Extras*: additional images (`<id>--<name>.png`). *focus*: the page needs the keyboard focus
+or real input (Robot), see "Writing a page". *runtime dependent*: shows values that legitimately differ between the JVM
+and a native executable (reported as `EXPECTED`).
+
+| Category | Id | Title | Class | Checks | Extras | awt-only | Notes |
+|---|---|---|---|---:|---:|---|---|
+| Overview | `overview-environment` | Environment | `pages.overview.EnvironmentPage` | 80 | 0 | yes |  |
+| Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 26 | 0 | yes | runtime dependent |
+| AWT | `awt-components` | AWT components | `pages.awt.AwtComponentsPage` | 50 | 0 | yes |  |
+| AWT | `awt-menus` | AWT menus | `pages.awt.AwtMenusPage` | 25 | 4 | yes | focus |
+| AWT | `awt-layouts` | AWT layouts | `pages.awt.AwtLayoutsPage` | 43 | 0 | yes |  |
+| AWT | `awt-windows` | Windows and dialogs | `pages.awt.AwtWindowsPage` | 45 | 1 | yes | focus |
+| AWT | `awt-events` | Event dispatch | `pages.awt.AwtEventsPage` | 44 | 1 | yes | focus |
+| AWT | `awt-focus` | Focus traversal | `pages.awt.AwtFocusPage` | 24 | 0 | yes | focus |
+| Java2D | `j2d-shapes` | Shapes and geometry | `pages.java2d.ShapesPage` | 36 | 0 | yes |  |
+| Java2D | `j2d-strokes` | Strokes | `pages.java2d.StrokesPage` | 42 | 0 | yes |  |
+| Java2D | `j2d-paints` | Paints and colors | `pages.java2d.PaintsPage` | 45 | 0 | yes |  |
+| Java2D | `j2d-composites` | Composites and XOR mode | `pages.java2d.CompositesPage` | 60 | 0 | yes |  |
+| Java2D | `j2d-transforms-clip` | Transforms, clipping and hints | `pages.java2d.TransformsClipPage` | 45 | 0 | yes |  |
+| Java2D | `j2d-surfaces` | Surfaces and image types | `pages.java2d.SurfacesPage` | 104 | 0 | yes |  |
+| Java2D | `j2d-onscreen-pipeline` | On-screen pipeline and BufferStrategy | `pages.java2d.OnscreenPipelinePage` | 34 | 0 | yes |  |
+| Text & Fonts | `text-fonts` | Fonts and rendering modes | `pages.text.TextFontsPage` | 88 | 0 | yes |  |
+| Text & Fonts | `text-attributes-layout` | Attributes and layout | `pages.text.TextAttributesLayoutPage` | 43 | 0 | yes |  |
+| Text & Fonts | `text-international` | International text | `pages.text.TextInternationalPage` | 41 | 0 | yes |  |
+| Images & Color | `images-imageio-formats` | ImageIO formats | `pages.images.ImageIoFormatsPage` | 85 | 0 | yes |  |
+| Images & Color | `images-imageio-metadata` | ImageIO metadata and plugins | `pages.images.ImageIoMetadataPage` | 75 | 0 | yes |  |
+| Images & Color | `images-ops` | Image operations | `pages.images.ImageOpsPage` | 59 | 0 | yes |  |
+| Images & Color | `images-toolkit` | Toolkit imaging | `pages.images.ToolkitImagingPage` | 45 | 0 | yes |  |
+| Images & Color | `images-color-management` | Color management (ICC) | `pages.images.ColorManagementPage` | 46 | 0 | yes |  |
+| Swing Components | `swing-buttons` | Buttons and range controls | `pages.swing.controls.ButtonsPage` | 37 | 0 |  |  |
+| Swing Components | `swing-text-fields` | Text fields, formatters and spinners | `pages.swing.controls.TextFieldsPage` | 41 | 0 |  |  |
+| Swing Components | `swing-text-documents` | Text documents, styles and undo | `pages.swing.controls.TextDocumentsPage` | 34 | 0 |  |  |
+| Swing Components | `swing-html-rtf` | HTML and RTF | `pages.swing.controls.HtmlRtfPage` | 39 | 0 |  |  |
+| Swing Components | `swing-lists-combos` | Lists and combo boxes | `pages.swing.controls.ListsCombosPage` | 21 | 2 |  | focus |
+| Swing Components | `swing-table` | Tables | `pages.swing.controls.TablePage` | 29 | 1 |  |  |
+| Swing Components | `swing-tree` | Trees | `pages.swing.controls.TreePage` | 20 | 0 |  |  |
+| Swing Components | `swing-containers` | Containers | `pages.swing.containers.SwingContainersPage` | 102 | 1 |  |  |
+| Swing Components | `swing-internal-frames` | Internal frames | `pages.swing.containers.InternalFramesPage` | 41 | 1 |  |  |
+| Swing Components | `swing-menus-popups` | Menus and popups | `pages.swing.containers.MenusPopupsPage` | 53 | 7 |  |  |
+| Swing Components | `swing-option-pane-dialogs` | Option panes and dialogs | `pages.swing.containers.OptionPaneDialogsPage` | 47 | 3 |  |  |
+| Swing Components | `swing-choosers` | Color and file choosers | `pages.swing.containers.ChoosersPage` | 49 | 1 |  |  |
+| Swing Components | `swing-decorations` | Borders, separators, tool tips, JLayer | `pages.swing.containers.DecorationsPage` | 31 | 3 |  |  |
+| Swing Components | `swing-awt-mixing` | Heavyweight and lightweight mixing | `pages.swing.containers.AwtMixingPage` | 21 | 2 |  | focus |
+| Swing Components | `swing-layouts` | Swing layouts | `pages.swing.infra.SwingLayoutsPage` | 56 | 0 |  |  |
+| Swing Components | `swing-keybindings` | Key bindings | `pages.swing.infra.SwingKeyBindingsPage` | 137 | 0 |  | focus |
+| Swing Components | `swing-painting` | Painting and RepaintManager | `pages.swing.infra.SwingPaintingPage` | 37 | 0 |  |  |
+| Swing Components | `swing-concurrency` | Timers, workers and event loops | `pages.swing.infra.SwingConcurrencyPage` | 40 | 0 |  |  |
+| Swing Components | `swing-rtl-i18n` | Right to left and localization | `pages.swing.infra.SwingRtlI18nPage` | 112 | 0 |  |  |
+| Swing Components | `swing-printing` | Swing printing | `pages.swing.infra.SwingPrintingPage` | 49 | 7 |  |  |
+| Look & Feel | `laf-metal` | Metal (Ocean, Steel, themes) | `pages.laf.MetalPage` | 176 | 7 |  |  |
+| Look & Feel | `laf-nimbus` | Nimbus | `pages.laf.NimbusPage` | 175 | 1 |  |  |
+| Look & Feel | `laf-synth-xml` | Synth from XML | `pages.laf.SynthXmlPage` | 178 | 0 |  |  |
+| Look & Feel | `laf-motif` | CDE/Motif | `pages.laf.MotifPage` | 144 | 0 |  |  |
+| Look & Feel | `laf-windows` | Windows and Windows Classic | `pages.laf.WindowsPage` | 176 | 1 |  |  |
+| Look & Feel | `laf-gtk` | GTK+ | `pages.laf.GtkPage` | 2 | 0 |  |  |
+| Look & Feel | `laf-switching` | Switching, custom and auxiliary look and feels | `pages.laf.SwitchingPage` | 44 | 7 |  |  |
+| Data Transfer & Desktop | `dt-clipboard` | Clipboard | `pages.datatransfer.ClipboardPage` | 76 | 0 | yes |  |
+| Data Transfer & Desktop | `dt-dnd` | Drag and drop (AWT) | `pages.datatransfer.DragAndDropPage` | 31 | 0 | yes | focus |
+| Data Transfer & Desktop | `dt-dnd-swing` | Drag and drop (Swing) | `pages.swing.desktop.SwingDragAndDropPage` | 36 | 0 |  | focus |
+| Data Transfer & Desktop | `desktop-services` | Desktop, Taskbar, SystemTray and cursors | `pages.desktop.DesktopServicesPage` | 59 | 0 | yes |  |
+| Data Transfer & Desktop | `desktop-robot` | Robot | `pages.desktop.RobotPage` | 30 | 1 | yes | focus |
+| Data Transfer & Desktop | `desktop-screens-hidpi` | Screens and HiDPI | `pages.desktop.ScreensHiDpiPage` | 48 | 0 | yes |  |
+| Data Transfer & Desktop | `desktop-input-methods` | Input methods (AWT) | `pages.desktop.InputMethodsPage` | 28 | 1 | yes |  |
+| Data Transfer & Desktop | `desktop-input-methods-swing` | Input methods (Swing) | `pages.swing.desktop.SwingInputMethodsPage` | 22 | 0 |  |  |
+| Printing | `print-java2d` | Printable and Book | `pages.print.PrintJava2dPage` | 36 | 5 | yes |  |
+| Printing | `print-javax-print` | javax.print services | `pages.print.JavaxPrintPage` | 69 | 0 | yes |  |
+| Printing | `print-dialogs` | Print dialogs | `pages.print.PrintDialogsPage` | 49 | 4 | yes |  |
+| Accessibility & Beans | `a11y-contexts` | Accessibility API (AWT) | `pages.a11y.AccessibilityPage` | 32 | 0 | yes |  |
+| Accessibility & Beans | `a11y-contexts-swing` | Accessibility API (Swing) | `pages.swing.a11y.SwingAccessibilityPage` | 25 | 0 |  |  |
+| Accessibility & Beans | `beans-introspection` | JavaBeans introspection | `pages.beans.BeansIntrospectionPage` | 52 | 0 | yes |  |
+| Accessibility & Beans | `beans-xml-persistence` | XMLEncoder and XMLDecoder | `pages.beans.XmlPersistencePage` | 29 | 0 | yes |  |
+| Accessibility & Beans | `beans-xml-persistence-swing` | XMLEncoder and XMLDecoder (Swing form) | `pages.swing.beans.SwingXmlPersistencePage` | 11 | 0 |  |  |
+| Sound | `sound` | Sampled audio and MIDI | `pages.sound.SoundPage` | 44 | 0 | yes |  |

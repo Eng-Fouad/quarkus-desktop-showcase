@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Second file loaded into the same SynthLookAndFeel (SynthLookAndFeel.load may be called several times : the styles
+  accumulate). Ids are per file : the painter bean is declared again.
+-->
+<synth>
+  <object id="progressPainter" class="io.quarkiverse.desktop.showcase.pages.laf.ShowcaseSynthPainter">
+    <void property="accent">
+      <object class="java.awt.Color">
+        <int>46</int>
+        <int>125</int>
+        <int>50</int>
+      </object>
+    </void>
+  </object>
+  <style id="progress">
+    <font name="Dialog" size="11" style="BOLD"/>
+    <state>
+      <color type="FOREGROUND TEXT_FOREGROUND" value="#1B5E20"/>
+    </state>
+    <insets top="2" left="2" bottom="2" right="2"/>
+    <property key="ProgressBar.horizontalSize" type="dimension" value="150 18"/>
+    <imagePainter method="progressBarBackground" path="/showcase/laf/synth/progress-track.png" sourceInsets="4 4 4 4"/>
+    <painter idref="progressPainter" method="progressBarForeground"/>
+  </style>
+  <bind style="progress" type="region" key="ProgressBar"/>
+</synth>
