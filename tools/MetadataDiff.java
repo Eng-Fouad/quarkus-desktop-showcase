@@ -34,8 +34,8 @@ import java.util.stream.Stream;
  * {@code io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources}, read from the deployment jars installed in
  * the local Maven repository (so the installed snapshot is compared, not the sources).
  * <p>
- * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] [--version=999-SNAPSHOT]
- * [--quarkus-version=3.40.0]
+ * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] [--no-java-beans]
+ * [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]
  * <p>
  * Universe : the classes and resources of the JDK modules java.desktop, java.datatransfer, jdk.unsupported.desktop and
  * jdk.accessibility ({@code jrt:/} of the JDK running the tool) and the packages of these modules. List entries are
@@ -59,13 +59,13 @@ public class MetadataDiff {
             "com.sun.java.accessibility", "com.sun.accessibility", "jdk.swing.interop", "java.applet", "sun.lwawt",
             "com.apple.eawt", "com.apple.laf");
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
-            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_CLASSES",
-            "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES", "RESOURCE_GLOBS",
-            "SERVICE_PROVIDERS", "REFLECTIVE_FIELDS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES");
+            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
+            "JNI_RUNTIME_ACCESS_CLASSES", "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES",
+            "RESOURCE_GLOBS", "SERVICE_PROVIDERS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES");
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux] [--awt-only] "
+            System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] "
                     + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
             System.exit(2);
         }
@@ -373,6 +373,10 @@ public class MetadataDiff {
                             reflectiveMethods.add(v);
                             reflectiveMethodOwners.add(owner(v));
                         }
+                        case "REFLECTIVE_FIELDS" -> {
+                            reflectiveFields.add(v);
+                            reflectiveMethodOwners.add(owner(v));
+                        }
                         case "SERVICE_PROVIDERS" -> providers.add(v);
                         case "JNI_RUNTIME_ACCESS_CLASSES" -> jniClasses.add(v);
                         case "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS" -> {
@@ -381,10 +385,6 @@ public class MetadataDiff {
                         }
                         case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
                         case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
-                        case "REFLECTIVE_FIELDS" -> {
-                            reflectiveFields.add(v);
-                            reflectiveMethodOwners.add(owner(v));
-                        }
                         case "REFLECTIVE_PUBLIC_MEMBERS" -> publicMembers.add(v);
                         case "JAVA_BEANS_CLASSES" -> {
                             if (javaBeans) {

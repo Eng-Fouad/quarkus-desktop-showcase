@@ -43,7 +43,7 @@ public class Compare {
     static final int NOISE_MAX_DELTA = 2;
     static final double NOISE_MAX_RATIO = 0.005;
     static final List<String> ENV_INFO_KEYS = List.of("runtime", "javaVendorVersion", "javaHome", "dpiaware", "uiScale",
-            "javaAwtHeadless");
+            "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher");
     static final List<String> NOT_ENV_KEYS = List.of("pages", "uncaughtOutsidePages");
 
     record ImageResult(String file, String status, long differing, long total, int maxDelta, String diffFile) {

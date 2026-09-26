@@ -21,7 +21,8 @@ import java.util.function.Consumer;
  * <li>{@link #render} (capture method A, the default) : {@code printAll} into a {@code TYPE_INT_ARGB} image. It
  * bypasses Swing double buffering and the on-screen pipeline, renders AWT heavyweight components through their peer
  * (Windows: native {@code WM_PRINT}, reliable at {@code -Dsun.java2d.uiScale=1} only, which tools/Snapshot.java sets
- * by default), and does not depend on what is on screen.</li>
+ * by default ; macOS : the Swing delegates of the peers, see {@link MacPeers}), and does not depend on what is on
+ * screen.</li>
  * <li>{@link #screen} (method B, opt-in) : Robot screen capture of the on-screen bounds (what the user sees, including
  * overlapping windows : only for dedicated checks).</li>
  * <li>{@link #offscreen} (method C) : Java2D drawing into a {@code BufferedImage}, independent of any window.</li>
@@ -51,7 +52,10 @@ public final class Snapshots {
                 g.scale(scale, scale);
             }
             g.setClip(0, 0, component.getWidth(), component.getHeight());
-            if (component.isShowing()) {
+            if (component.isShowing() && MacPeers.applies()) {
+                // macOS : the AWT components are drawn by Swing delegates of their peers, which printAll does not draw
+                MacPeers.print(component, g);
+            } else if (component.isShowing()) {
                 component.printAll(g);
             } else {
                 printDetached(component, g);

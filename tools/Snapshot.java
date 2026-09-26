@@ -27,6 +27,15 @@ import java.util.stream.Stream;
  * with printAll at scale 1 only). {@code --hidpi} keeps the real UI scale : its report shows whether the executable is
  * DPI aware (defaultTransform, screenResolution).
  * <p>
+ * macOS : the native executable is {@code target/*-runner} (next to its {@code .dylib} libraries). The defaults also
+ * pin what the {@code java} launcher sets or what changes the rendering : {@code -Dapple.awt.application.name=Quarkus
+ * Desktop Showcase}, {@code -Dapple.awt.application.appearance=NSAppearanceNameAqua},
+ * {@code -Dapple.laf.useScreenMenuBar=false} ; JVM runs get {@code --add-opens java.desktop/java.awt=ALL-UNNAMED
+ * --add-opens java.desktop/sun.lwawt=ALL-UNNAMED} (the capture of the AWT components, core/MacPeers). Before the
+ * watchdog kills a run, {@code sample} writes the threads of the process to hang-sample.txt. Run from a Terminal window
+ * of a graphical session (over ssh AWT is headless) ; Robot needs the Screen Recording and Accessibility permissions of
+ * the terminal (System Settings, Privacy &amp; Security).
+ * <p>
  * {@code --pages} : comma separated page ids, an entry ending with {@code -} or {@code *} being a prefix.
  * {@code --categories} : comma separated category keys (overview, awt, java2d, text, images, swing, laf, desktop,
  * printing, a11y, sound) or names. {@code --trace} (jvm only) runs the JVM under the GraalVM tracing agent, metadata in
@@ -152,6 +161,21 @@ public class Snapshot {
         if (!o.hidpi && o.options.stream().noneMatch(opt -> opt.startsWith("-Dsun.java2d.uiScale="))) {
             command.add("-Dsun.java2d.uiScale=1");
         }
+        if (isMac()) {
+            // set by the java launcher (the application name) or changing the rendering : the same in both runs
+            for (String[] property : new String[][] { { "apple.awt.application.name", "Quarkus Desktop Showcase" },
+                    { "apple.awt.application.appearance", "NSAppearanceNameAqua" },
+                    { "apple.laf.useScreenMenuBar", "false" } }) {
+                if (o.options.stream().noneMatch(opt -> opt.startsWith("-D" + property[0] + "="))) {
+                    command.add("-D" + property[0] + "=" + property[1]);
+                }
+            }
+            if (mode.equals("jvm")) {
+                // core/MacPeers : the Swing delegates of the AWT peers (the native build gets them from the mac profile)
+                command.addAll(List.of("--add-opens", "java.desktop/java.awt=ALL-UNNAMED", "--add-opens",
+                        "java.desktop/sun.lwawt=ALL-UNNAMED"));
+            }
+        }
         command.addAll(o.options);
         if (mode.equals("native")) {
             command.addAll(o.nativeOptions);
@@ -169,6 +193,10 @@ public class Snapshot {
         if (process.waitFor(o.timeoutSeconds, TimeUnit.SECONDS)) {
             exit = process.exitValue();
         } else {
+            if (isMac()) {
+                // the threads of the stuck process (the first thread must be in CFRunLoopRun / -[NSApplication run])
+                sample(process.pid(), out.resolve("hang-sample.txt"));
+            }
             process.descendants().forEach(ProcessHandle::destroyForcibly);
             process.destroyForcibly().waitFor();
             Files.writeString(log, "WATCHDOG: killed after " + o.timeoutSeconds + "s\n", StandardOpenOption.APPEND);
@@ -231,13 +259,28 @@ public class Snapshot {
     }
 
     /**
+     * macOS : writes 3 seconds of samples of the threads of a process ({@code sample}, no root needed for own processes).
+     */
+    static void sample(long pid, Path file) {
+        try {
+            new ProcessBuilder("sample", String.valueOf(pid), "3", "-file", file.toString()).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor(30, TimeUnit.SECONDS);
+        } catch (IOException e) {
+            // best effort
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
      * The native executable of the variant : target/*-runner(.exe).
      */
     static Path nativeExecutable(Path target) throws IOException {
         if (Files.isDirectory(target)) {
             try (Stream<Path> files = Files.list(target)) {
+                // macOS and Linux : the executable file without extension (not the .dylib/.so libraries next to it)
                 List<Path> runners = files.filter(p -> p.getFileName().toString().endsWith(isWindows() ? "-runner.exe" : "-runner"))
-                        .filter(Files::isRegularFile).toList();
+                        .filter(Files::isRegularFile).filter(p -> isWindows() || Files.isExecutable(p)).toList();
                 if (!runners.isEmpty()) {
                     return runners.getFirst().toAbsolutePath();
                 }
@@ -249,6 +292,10 @@ public class Snapshot {
 
     static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
+    }
+
+    static boolean isMac() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("mac");
     }
 
     static void deleteRecursively(Path dir) throws IOException {

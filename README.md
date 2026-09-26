@@ -20,10 +20,13 @@ The awt-only variant proves that quarkus-desktop-awt works without Swing applica
 
 ## Requirements
 
-- Windows x64 or Linux x64 (native executables), or macOS (JVM mode only: GraalVM native images do not support AWT on
-  macOS)
+- Windows x64, Linux x64, or macOS on Apple silicon. Native executables on macOS need the quarkus-awt of the Quarkus
+  pull request [Enable quarkus-awt on macOS](https://github.com/quarkusio/quarkus/pull/56979) (not in a Quarkus release
+  yet: build Quarkus from it) and GraalVM 25.1 or later: see [Verifying on macOS](#verifying-on-macos)
 - JDK 25 for the JVM mode and the tools, GraalVM for JDK 25 for native executables (`GRAALVM_HOME`)
-- quarkus-desktop `999-SNAPSHOT` installed in the local Maven repository (`mvn install` in a quarkus-desktop checkout)
+- quarkus-desktop `999-SNAPSHOT` installed in the local Maven repository: clone
+  [quarkus-desktop](https://github.com/Eng-Fouad/quarkus-desktop) and run `mvn install` in it
+  (`git clone https://github.com/Eng-Fouad/quarkus-desktop && cd quarkus-desktop && mvn install -DskipTests`)
 - Native builds: the [Quarkus native prerequisites](https://quarkus.io/guides/building-native-image) (Visual Studio
   Build Tools on Windows, gcc and zlib development packages on Linux)
 
@@ -36,7 +39,7 @@ Maven is provided by the wrapper (`./mvnw` on Linux and macOS, `mvnw.cmd` on Win
 java -jar target/quarkus-app/quarkus-run.jar
 ```
 
-Native executable (`...-runner.exe` on Windows):
+Native executable (`...-runner.exe` on Windows, next to its `.dll`, `.so` or `.dylib` libraries):
 
 ```bash
 ./mvnw package -Dnative
@@ -122,14 +125,14 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
 - `java tools/Cycle.java <label> --trace` (or `java tools/Snapshot.java jvm trace --trace`): JVM snapshots under the
   GraalVM tracing agent, then `tools/MetadataDiff.java` lists the JNI, reflection, resource, bundle, serialization and
   proxy accesses of the JDK desktop modules that quarkus-desktop does not register for the current platform:
-  `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux] [--awt-only]
+  `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux|mac] [--awt-only]
   [--no-java-beans]`.
   It reads the `static String[]` lists of `io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources` and
   `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2`,
   understands package entries, `fqcn#member` entries and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
   `java-beans.jdk-classes` properties), and also lists stale entries (names that do not exist in the JDK).
-- `java tools/ClinitAudit.java [windows|linux] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
+- `java tools/ClinitAudit.java [windows|linux|mac] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
   system properties or resource bundles (JDK class file API, no library needed).
@@ -195,7 +198,8 @@ Each page is a class of `src/main/java/io/quarkiverse/desktop/showcase/pages/<gr
 feature surface of the JDK desktop modules: Overview, AWT, Java2D, Text & Fonts, Images & Color, Swing Components,
 Look & Feel, Data Transfer & Desktop, Printing, Accessibility & Beans, Sound.
 
-67 pages with 3755 checks in the default variant, 36 pages in the awt-only variant. Classes are
+75 pages with 3767 checks in the default variant, 40 pages in the awt-only variant (the 8 macOS pages only report
+that they are not available on Windows and Linux). Classes are
 relative to `io.quarkiverse.desktop.showcase`. *Checks*: number of checks of a Windows JVM run (some pages have
 platform-specific checks). *Extras*: additional images (`<id>--<name>.png`). *focus*: the page needs the keyboard focus
 or real input (Robot), see "Writing a page". *runtime dependent*: shows values that legitimately differ between the JVM
@@ -203,7 +207,7 @@ and a native executable (reported as `EXPECTED`).
 
 | Category | Id | Title | Class | Checks | Extras | awt-only | Notes |
 |---|---|---|---|---:|---:|---|---|
-| Overview | `overview-environment` | Environment | `pages.overview.EnvironmentPage` | 80 | 0 | yes |  |
+| Overview | `overview-environment` | Environment | `pages.overview.EnvironmentPage` | 82 | 0 | yes |  |
 | Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 28 | 0 | yes | runtime dependent |
 | AWT | `awt-components` | AWT components | `pages.awt.AwtComponentsPage` | 50 | 0 | yes |  |
 | AWT | `awt-menus` | AWT menus | `pages.awt.AwtMenusPage` | 25 | 4 | yes | focus |
@@ -226,6 +230,7 @@ and a native executable (reported as `EXPECTED`).
 | Images & Color | `images-ops` | Image operations | `pages.images.ImageOpsPage` | 59 | 0 | yes |  |
 | Images & Color | `images-toolkit` | Toolkit imaging | `pages.images.ToolkitImagingPage` | 45 | 0 | yes |  |
 | Images & Color | `images-color-management` | Color management (ICC) | `pages.images.ColorManagementPage` | 46 | 0 | yes |  |
+| Images & Color | `desktop-mac-nsimage` | macOS images (NSImage, @2x) | `pages.images.MacImagesPage` | 1 | 1 | yes | macOS |
 | Swing Components | `swing-buttons` | Buttons and range controls | `pages.swing.controls.ButtonsPage` | 37 | 0 |  |  |
 | Swing Components | `swing-text-fields` | Text fields, formatters and spinners | `pages.swing.controls.TextFieldsPage` | 41 | 0 |  |  |
 | Swing Components | `swing-text-documents` | Text documents, styles and undo | `pages.swing.controls.TextDocumentsPage` | 34 | 0 |  |  |
@@ -252,6 +257,8 @@ and a native executable (reported as `EXPECTED`).
 | Look & Feel | `laf-motif` | CDE/Motif | `pages.laf.MotifPage` | 144 | 0 |  |  |
 | Look & Feel | `laf-windows` | Windows and Windows Classic | `pages.laf.WindowsPage` | 176 | 1 |  |  |
 | Look & Feel | `laf-gtk` | GTK+ | `pages.laf.GtkPage` | 2 | 0 |  |  |
+| Look & Feel | `laf-aqua` | Aqua (macOS) | `pages.laf.AquaPage` | 2 | 1 |  | macOS |
+| Look & Feel | `laf-aqua-client-properties` | Aqua variants (macOS) | `pages.laf.AquaVariantsPage` | 1 | 0 |  | macOS |
 | Look & Feel | `laf-switching` | Switching, custom and auxiliary look and feels | `pages.laf.SwitchingPage` | 44 | 7 |  |  |
 | Data Transfer & Desktop | `dt-clipboard` | Clipboard | `pages.datatransfer.ClipboardPage` | 76 | 0 | yes |  |
 | Data Transfer & Desktop | `dt-dnd` | Drag and drop (AWT) | `pages.datatransfer.DragAndDropPage` | 31 | 0 | yes | focus |
@@ -261,12 +268,134 @@ and a native executable (reported as `EXPECTED`).
 | Data Transfer & Desktop | `desktop-screens-hidpi` | Screens and HiDPI | `pages.desktop.ScreensHiDpiPage` | 48 | 0 | yes |  |
 | Data Transfer & Desktop | `desktop-input-methods` | Input methods (AWT) | `pages.desktop.InputMethodsPage` | 28 | 1 | yes |  |
 | Data Transfer & Desktop | `desktop-input-methods-swing` | Input methods (Swing) | `pages.swing.desktop.SwingInputMethodsPage` | 22 | 0 |  |  |
+| Data Transfer & Desktop | `desktop-mac-app-events` | macOS application events | `pages.desktop.MacAppEventsPage` | 2 | 0 | yes | macOS |
+| Data Transfer & Desktop | `desktop-mac-windows` | macOS window properties | `pages.swing.desktop.MacWindowsPage` | 1 | 2 |  | macOS |
+| Data Transfer & Desktop | `desktop-mac-dock-menubar` | macOS Dock and menu bar | `pages.swing.desktop.MacDockMenuBarPage` | 1 | 1 |  | macOS |
+| Data Transfer & Desktop | `desktop-mac-file-dialog` | macOS file dialogs | `pages.desktop.MacFileDialogPage` | 1 | 0 | yes | macOS |
 | Printing | `print-java2d` | Printable and Book | `pages.print.PrintJava2dPage` | 36 | 5 | yes |  |
 | Printing | `print-javax-print` | javax.print services | `pages.print.JavaxPrintPage` | 69 | 0 | yes |  |
 | Printing | `print-dialogs` | Print dialogs | `pages.print.PrintDialogsPage` | 49 | 4 | yes |  |
+| Printing | `print-mac` | macOS printing | `pages.print.MacPrintPage` | 1 | 0 | yes | macOS |
 | Accessibility & Beans | `a11y-contexts` | Accessibility API (AWT) | `pages.a11y.AccessibilityPage` | 32 | 0 | yes |  |
 | Accessibility & Beans | `a11y-contexts-swing` | Accessibility API (Swing) | `pages.swing.a11y.SwingAccessibilityPage` | 25 | 0 |  |  |
 | Accessibility & Beans | `beans-introspection` | JavaBeans introspection | `pages.beans.BeansIntrospectionPage` | 52 | 0 | yes |  |
 | Accessibility & Beans | `beans-xml-persistence` | XMLEncoder and XMLDecoder | `pages.beans.XmlPersistencePage` | 29 | 0 | yes |  |
 | Accessibility & Beans | `beans-xml-persistence-swing` | XMLEncoder and XMLDecoder (Swing form) | `pages.swing.beans.SwingXmlPersistencePage` | 11 | 0 |  |  |
 | Sound | `sound` | Sampled audio and MIDI | `pages.sound.SoundPage` | 45 | 0 | yes |  |
+
+*macOS*: pages that only apply on macOS (Aqua, the application events, the Dock and the menu bar, the window client
+properties, the native file dialogs, NSImage and `@2x` images, Cocoa printing). Elsewhere they only show an
+`availability` check (`not available on this OS`, like `laf-gtk` on Windows); on macOS their extras and checks are those
+of the page description (extras: `laf-aqua--gallery-2x`, `desktop-mac-windows--plain` and `--styled`,
+`desktop-mac-dock-menubar--screen-menu-bar-frame`, `desktop-mac-nsimage--2x`).
+
+## Verifying on macOS
+
+The macOS support of quarkus-desktop (native executables) can only run on a Mac: this is the check list to run on an
+Apple silicon Mac, from a Terminal window of a graphical session (never over `ssh`: AWT is headless there), in a
+directory outside `~/Desktop`, `~/Documents` and `~/Downloads` (macOS asks for permissions there). The macOS pages and
+checks of the showcase are listed above; `overview-environment` also checks that `QuarkusApplication.run()` runs on the
+thread `main` and that the `AppKit Thread` exists (AWT owns the application), and records the `macos.*` and
+`property.*` keys of the environment.
+
+### 1. Tools, GraalVM, Quarkus and quarkus-desktop
+
+```bash
+xcode-select --install                     # clang, otool, nm, codesign
+mkdir -p ~/dev && cd ~/dev
+curl -LO https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.4.4.1.1/graalvm-community-jdk-25i4-25.0.4.1.1_macos-aarch64_bin.tar.gz
+tar xzf graalvm-community-jdk-25i4-25.0.4.1.1_macos-aarch64_bin.tar.gz
+export JAVA_HOME=$(echo ~/dev/graalvm-community-*/Contents/Home) GRAALVM_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
+native-image --version                      # GraalVM CE 25.4 (25.1 or later is needed)
+xattr -l $JAVA_HOME/lib/libawt.dylib        # nothing ; otherwise: xattr -dr com.apple.quarantine ~/dev/graalvm-community-*
+# Quarkus built from the pull request "Enable quarkus-awt on macOS" (quarkus-awt with macOS support, not released yet)
+git clone --filter=blob:none https://github.com/quarkusio/quarkus quarkus-pr-56979
+cd quarkus-pr-56979
+git fetch https://github.com/quarkusio/quarkus pull/56979/head:pr-56979 && git checkout pr-56979
+./mvnw -Dquickly                            # installs Quarkus 999-SNAPSHOT (tens of minutes)
+cd ~/dev
+git clone https://github.com/Eng-Fouad/quarkus-desktop
+(cd quarkus-desktop && ./mvnw -B install -DskipTests)
+git clone https://github.com/Eng-Fouad/quarkus-desktop-showcase
+```
+
+The quarkus-desktop documentation page "Verifying macOS support" (`docs/modules/ROOT/pages/macos-verification.adoc`)
+checks a small probe application first (window, threads, libraries, Metal, exit codes): run it before the showcase.
+
+### 2. JVM and native cycles
+
+```bash
+cd ~/dev/quarkus-desktop-showcase
+Q=--maven-args=-Dquarkus.platform.version=999-SNAPSHOT
+java tools/Cycle.java mac --trace $Q                         # JVM, tracing agent, native, compare
+java tools/Cycle.java mac-awt-only --awt-only $Q             # the AWT pages (drawn by Aqua delegates on macOS)
+java tools/Cycle.java mac-hidpi --hidpi $Q                   # real Retina scale (2.0 in both runs)
+java tools/Cycle.java mac-exact --exact $Q                   # accesses missing from the metadata, in native run.log
+java tools/Cycle.java mac-opengl $Q -- -Dsun.java2d.opengl=true
+```
+
+What to look at:
+
+- the first line of `comparison/logs-mac/compare.txt`: `MATCH` expected, except the runtime dependent pages;
+- `ENV DIFF` lines: none expected. `pipeline` must be `MTLGraphicsConfig` in both runs (`CGLGraphicsConfig` in the
+  native run means the Metal shaders are missing), `macos.appKitThread` `true` in both runs, `mainThread` `main`;
+- no `InternalError` from `LWComponentPeer` (the reflection of `java.awt.Toolkit#eventListener`), no `Bad JNI lookup`
+  in `comparison/native-mac/run.log`; `laf-aqua-client-properties`: `null borders` is 0 in both runs;
+- `comparison/logs-mac/native-artifacts.txt`: the `.dylib` libraries next to the executable (`libawt`,
+  `libawt_lwawt`, `libosxapp`, `libosxui`, `libfontmanager`, `libjava`, `libjvm`...), `CoreFoundation` in `otool -L`,
+  `@loader_path` in `LC_RPATH`, `Signature=adhoc`;
+- `comparison/trace-mac/metadata-diff.md`: the registrations that the `MAC_` lists of quarkus-desktop miss (the `## `
+  headings with counts);
+- a stuck run is killed by the watchdog after `sample` wrote `comparison/<label>/hang-sample.txt`: the main thread must
+  be in `CFRunLoopRun` / `-[NSApplication run]`, not in `pthread_cond_wait`.
+
+### 3. Robot and privacy permissions
+
+Robot needs the Screen Recording permission (captures) and the Accessibility permission (input events) of the application
+that starts the tools (Terminal, iTerm2 or IntelliJ IDEA): System Settings > Privacy & Security > Screen & System Audio
+Recording, and > Accessibility; restart the terminal after granting them. Then:
+
+```bash
+java tools/Cycle.java mac-robot --skip-native-build -- -Dshowcase.robot=true
+```
+
+The environment keys `macos.tcc.screenCapture` and `macos.tcc.input` must be `true` in both runs. Reset the permissions
+with `tccutil reset ScreenCapture com.apple.Terminal` and `tccutil reset Accessibility com.apple.Terminal`.
+
+### 4. Manual checks (JVM, then native)
+
+```bash
+java --add-opens java.desktop/java.awt=ALL-UNNAMED --add-opens java.desktop/sun.lwawt=ALL-UNNAMED \
+    -Dshowcase.interactive=true -Dshowcase.pages=desktop-mac-,laf-aqua,print-mac -jar target/quarkus-app/quarkus-run.jar
+./target/*-runner -Dshowcase.interactive=true -Dshowcase.pages=desktop-mac-,laf-aqua,print-mac
+```
+
+With `-Dshowcase.sideEffects=true`, the Dock page also sets a badge, an icon, a menu and a progress value, and requests
+attention (restored when the page is left). Check, and note what differs between the JVM and the native executable:
+
+- `desktop-mac-app-events`: application menu > About (an event in the log, not the standard About panel), Settings,
+  Quit (the page cancels it), hide (Cmd+H) and show, Dock icon click with no window (reopened);
+- `desktop-mac-dock-menubar`: the `Screen menu bar` frame shows its `JMenuBar` in the macOS menu bar when active, the AWT
+  frame its `MenuBar`; the Dock badge, icon, menu and progress with side effects;
+- `desktop-mac-windows`: transparent small title bar without title, full size content, document modified dot and proxy
+  icon, no zoom button, textured tool bar;
+- `desktop-mac-file-dialog`: the button shows the open panel (multiple selection, `.txt` filter), the directory panel,
+  the save panel (nothing is written);
+- `print-mac`: the print panel and the page layout panel (cancel them, or "Save as PDF");
+- `laf-aqua`: the Aqua gallery, and Aqua drawing the AWT components (`awt-components` in the awt-only variant);
+- VoiceOver (Cmd+F5) and Accessibility Inspector over the Swing gallery and the AWT pages: names read, no crash;
+- open files, URIs and print files need an application bundle: `sh tools/mac-app-bundle.sh native` (or `jvm`), then the
+  commands at the top of that script;
+- exit paths: close the main window (exit code 0), Cmd+Q (0), Ctrl-C in the terminal (the shutdown hooks run).
+
+### 5. Report back
+
+Send the results (or attach them to an issue of quarkus-desktop):
+
+- `sw_vers`, `uname -m`, `native-image --version`, the Quarkus commit (`git -C ~/dev/quarkus-pr-56979 rev-parse HEAD`);
+- the `comparison/` directory (at least `logs-*/`, `diff-*/summary.txt`, `trace-mac/metadata-diff.md`, the
+  `report.json` and `run.log` of every run, `hang-sample.txt` if any) and `native-artifacts.txt`;
+- the result of each manual check (passed, or what happened, with screenshots), for the JVM and the native executable.
+
+A missing registration (`Bad JNI lookup`, `MissingReflectionRegistrationError`, `NoSuchMethodError`...) goes into the
+`MAC_` lists of `AwtClassesAndResources` or `SwingClassesAndResources` of quarkus-desktop.

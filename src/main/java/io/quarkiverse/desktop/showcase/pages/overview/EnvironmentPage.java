@@ -35,6 +35,7 @@ import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.Environment;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -73,6 +74,18 @@ public class EnvironmentPage implements FeaturePage {
         Map<String, Object> env = Environment.describe();
         List<Check> runtime = new ArrayList<>();
         runtime.add(Checks.expect("GraphicsEnvironment.isHeadless()", false, GraphicsEnvironment::isHeadless));
+        // quarkus-desktop runs the application on a new thread named main in macOS native executables : main everywhere
+        runtime.add(Checks.expect("QuarkusApplication.run() thread", "main", ShowcaseMode::mainThread));
+        if (Platforms.isMac()) {
+            runtime.add(Checks.expect("Toolkit (macOS)", "sun.lwawt.macosx.LWCToolkit",
+                    () -> Toolkit.getDefaultToolkit().getClass().getName()));
+            runtime.add(Checks.expect("GraphicsEnvironment (macOS)", "sun.awt.CGraphicsEnvironment",
+                    () -> GraphicsEnvironment.getLocalGraphicsEnvironment().getClass().getName()));
+            // AWT owns the application (the first thread of the process runs its event loop) : the desktop handlers of
+            // java.awt.Desktop (About, Quit, open files) work
+            runtime.add(Checks.expect("AppKit Thread (AWT owns the application)", true, () -> Thread.getAllStackTraces()
+                    .keySet().stream().anyMatch(t -> "AppKit Thread".equals(t.getName()))));
+        }
         env.forEach((key, value) -> {
             if (!Environment.INFO_KEYS.contains(key) && !key.equals("headless") && !key.equals("desktopFeatures")) {
                 runtime.add(Check.info(key, value));

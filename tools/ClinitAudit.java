@@ -40,7 +40,7 @@ import java.util.stream.Stream;
  * fails the build), system properties or environment reads (values frozen at build time), resource bundles (locale
  * frozen at build time), and initialization of classes that are initialized at run time.
  * <p>
- * usage: java tools/ClinitAudit.java [windows|linux] [--awt-only] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]
+ * usage: java tools/ClinitAudit.java [windows|linux|mac] [--awt-only] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]
  * [class_initialization_report.csv]
  * <p>
  * Run time initialized : the RUNTIME_INITIALIZED_PACKAGES / RUNTIME_INITIALIZED_CLASSES lists (common and platform) of
@@ -93,7 +93,8 @@ public class ClinitAudit {
             } else if (arg.endsWith(".csv")) {
                 report = Path.of(arg);
             } else {
-                platform = arg.toLowerCase(Locale.ROOT).startsWith("win") ? "WINDOWS" : "LINUX";
+                platform = arg.toLowerCase(Locale.ROOT).startsWith("win") ? "WINDOWS"
+                        : arg.toLowerCase(Locale.ROOT).startsWith("mac") ? "MAC" : "LINUX";
             }
         }
 
