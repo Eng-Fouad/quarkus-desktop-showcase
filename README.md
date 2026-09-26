@@ -183,7 +183,7 @@ Each page is a class of `src/main/java/io/quarkiverse/desktop/showcase/pages/<gr
 feature surface of the JDK desktop modules: Overview, AWT, Java2D, Text & Fonts, Images & Color, Swing Components,
 Look & Feel, Data Transfer & Desktop, Printing, Accessibility & Beans, Sound.
 
-67 pages with 3753 checks in the default variant, 36 pages in the awt-only variant. Classes are
+67 pages with 3755 checks in the default variant, 36 pages in the awt-only variant. Classes are
 relative to `io.quarkiverse.desktop.showcase`. *Checks*: number of checks of a Windows JVM run (some pages have
 platform-specific checks). *Extras*: additional images (`<id>--<name>.png`). *focus*: the page needs the keyboard focus
 or real input (Robot), see "Writing a page". *runtime dependent*: shows values that legitimately differ between the JVM
@@ -192,7 +192,7 @@ and a native executable (reported as `EXPECTED`).
 | Category | Id | Title | Class | Checks | Extras | awt-only | Notes |
 |---|---|---|---|---:|---:|---|---|
 | Overview | `overview-environment` | Environment | `pages.overview.EnvironmentPage` | 80 | 0 | yes |  |
-| Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 26 | 0 | yes | runtime dependent |
+| Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 28 | 0 | yes | runtime dependent |
 | AWT | `awt-components` | AWT components | `pages.awt.AwtComponentsPage` | 50 | 0 | yes |  |
 | AWT | `awt-menus` | AWT menus | `pages.awt.AwtMenusPage` | 25 | 4 | yes | focus |
 | AWT | `awt-layouts` | AWT layouts | `pages.awt.AwtLayoutsPage` | 43 | 0 | yes |  |
@@ -208,7 +208,7 @@ and a native executable (reported as `EXPECTED`).
 | Java2D | `j2d-onscreen-pipeline` | On-screen pipeline and BufferStrategy | `pages.java2d.OnscreenPipelinePage` | 34 | 0 | yes |  |
 | Text & Fonts | `text-fonts` | Fonts and rendering modes | `pages.text.TextFontsPage` | 88 | 0 | yes |  |
 | Text & Fonts | `text-attributes-layout` | Attributes and layout | `pages.text.TextAttributesLayoutPage` | 43 | 0 | yes |  |
-| Text & Fonts | `text-international` | International text | `pages.text.TextInternationalPage` | 41 | 0 | yes |  |
+| Text & Fonts | `text-international` | International text | `pages.text.TextInternationalPage` | 40 | 0 | yes |  |
 | Images & Color | `images-imageio-formats` | ImageIO formats | `pages.images.ImageIoFormatsPage` | 85 | 0 | yes |  |
 | Images & Color | `images-imageio-metadata` | ImageIO metadata and plugins | `pages.images.ImageIoMetadataPage` | 75 | 0 | yes |  |
 | Images & Color | `images-ops` | Image operations | `pages.images.ImageOpsPage` | 59 | 0 | yes |  |
@@ -257,4 +257,4 @@ and a native executable (reported as `EXPECTED`).
 | Accessibility & Beans | `beans-introspection` | JavaBeans introspection | `pages.beans.BeansIntrospectionPage` | 52 | 0 | yes |  |
 | Accessibility & Beans | `beans-xml-persistence` | XMLEncoder and XMLDecoder | `pages.beans.XmlPersistencePage` | 29 | 0 | yes |  |
 | Accessibility & Beans | `beans-xml-persistence-swing` | XMLEncoder and XMLDecoder (Swing form) | `pages.swing.beans.SwingXmlPersistencePage` | 11 | 0 |  |  |
-| Sound | `sound` | Sampled audio and MIDI | `pages.sound.SoundPage` | 44 | 0 | yes |  |
+| Sound | `sound` | Sampled audio and MIDI | `pages.sound.SoundPage` | 45 | 0 | yes |  |

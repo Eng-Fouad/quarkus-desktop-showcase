@@ -20,6 +20,7 @@ import java.awt.geom.AffineTransform;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.BreakIterator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -43,8 +44,9 @@ import io.quarkiverse.desktop.showcase.core.Ui;
  * Where a native executable legitimately differs from the JVM (a {@link #runtimeDependent()} page : its differences are
  * EXPECTED) : no {@code java} launcher (no {@code sun.java.launcher}, so no automatic DPI awareness on Windows without
  * {@code sun.java2d.dpiaware}, no launcher splash screen), no JDK home ({@code java.home} is a temporary font home
- * created by quarkus-awt), no class path, {@code resource:} URLs, the locales and charsets included at build time, and
- * the Windows visual styles, which need a comctl32 v6 manifest in the executable (java.exe has one).
+ * created by quarkus-awt), no class path, {@code resource:} URLs, the locales and charsets included at build time, the
+ * Windows visual styles, which need a comctl32 v6 manifest in the executable (java.exe has one), and the break
+ * iterators of the build locale only (GraalVM).
  * <p>
  * The "Must hold in both runtimes" table contains real checks : a failure there is a missing native configuration
  * (the splash screen library, the Java Access Bridge provider, the charsets of the Windows font configuration).
@@ -53,6 +55,9 @@ import io.quarkiverse.desktop.showcase.core.Ui;
 public class NativeLimitsPage implements FeaturePage {
 
     private static final int HALF_WIDTH = 494;
+
+    /** The Thai sample of the text-international page. */
+    private static final String THAI = "สวัสดีชาวโลก กิ่ง ป่า น้ำ";
 
     @Override
     public String id() {
@@ -124,6 +129,27 @@ public class NativeLimitsPage implements FeaturePage {
         checks.add(Check.info("native.encoding / sun.jnu.encoding",
                 property("native.encoding") + " / " + property("sun.jnu.encoding")));
         checks.add(Check.info("SplashScreen", "only the java launcher shows one (-splash:, SplashScreen-Image)"));
+        // GraalVM substitutes BreakIterator.getWordInstance/getLineInstance/getCharacterInstance/getSentenceInstance(Locale)
+        // (com.oracle.svm.core.jdk.localization.substitutions.Target_java_text_BreakIterator) : a native executable
+        // returns copies of the break iterators of the default locale of the image build, whatever the locale. The
+        // dictionary based Thai line breaks of jdk.localedata (thai_dict) cannot be used, even when the Thai locale data
+        // and the dictionary are included in the executable
+        checks.add(Checks.info("BreakIterator.getLineInstance(th) : boundaries of a Thai sample (native : the break "
+                + "iterators of the build locale, whatever the locale)", () -> {
+                    BreakIterator it = BreakIterator.getLineInstance(Locale.forLanguageTag("th"));
+                    it.setText(THAI);
+                    List<String> boundaries = new ArrayList<>();
+                    for (int b = it.first(); b != BreakIterator.DONE; b = it.next()) {
+                        boundaries.add(String.valueOf(b));
+                    }
+                    return String.join(" ", boundaries);
+                }));
+        // java.lang.reflect.Array.get boxes the element of a primitive array : HotSpot creates a new wrapper object, a
+        // native executable uses Integer.valueOf (its cache). XMLEncoder identifies values by identity : a small int of an
+        // int[] is written as <int> by the JVM, and by the name of a constant with the same cached value (for instance
+        // TextAttribute.SUPERSCRIPT_SUPER) by a native executable
+        checks.add(Checks.info("Array.get(new int[] { 1 }, 0) == Integer.valueOf(1) (boxing of array elements)",
+                () -> java.lang.reflect.Array.get(new int[] { 1 }, 0) == Integer.valueOf(1)));
         return checks;
     }
 

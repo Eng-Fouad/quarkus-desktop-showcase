@@ -378,6 +378,21 @@ public class SoundPage implements FeaturePage {
                         + AudioSystem.isLineSupported(new DataLine.Info(SourceDataLine.class, pcm16())) + ", "
                         + AudioSystem.isLineSupported(new DataLine.Info(TargetDataLine.class, pcm16())) + ", "
                         + AudioSystem.isLineSupported(Port.Info.SPEAKER)));
+        // a port opened (the mixer of the audio device, read only : no volume is changed) : its controls are objects
+        // that the native code of Java Sound creates (JNI)
+        checks.add(Checks.info("Port.Info.SPEAKER : open, controls", () -> {
+            if (!AudioSystem.isLineSupported(Port.Info.SPEAKER)) {
+                return "no speaker port";
+            }
+            Port port = (Port) AudioSystem.getLine(Port.Info.SPEAKER);
+            port.open();
+            try {
+                return port.getControls().length + " controls " + String.join(" ", Arrays.stream(port.getControls())
+                        .map(c -> c.getClass().getSuperclass().getSimpleName() + " " + c.getType()).toList());
+            } finally {
+                port.close();
+            }
+        }));
         checks.add(Checks.info("default mixer : source and target line kinds", () -> {
             Mixer mixer = AudioSystem.getMixer(null);
             return mixer.getMixerInfo().getName() + " : " + mixer.getSourceLineInfo().length + " source, "

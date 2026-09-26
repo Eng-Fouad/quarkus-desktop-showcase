@@ -415,8 +415,7 @@ public class TextInternationalPage implements FeaturePage {
         checks.add(Checks.expect("BreakIterator.getWordInstance : boundaries of the mixed text",
                 "0 4 5 11 12 17 18 21 22 29 30 34 35 36 37 40 41 43 44 49 50 54 55",
                 () -> boundaries(BreakIterator.getWordInstance(Locale.ROOT), MIXED)));
-        checks.add(Checks.info("BreakIterator.getLineInstance(th) : boundaries of the Thai sample (dictionary, locale "
-                + "data)", () -> boundaries(BreakIterator.getLineInstance(Locale.forLanguageTag("th")), THAI)));
+        // BreakIterator.getLineInstance(th) (dictionary based Thai line breaks) : see overview-native-limits
     }
 
     /**
