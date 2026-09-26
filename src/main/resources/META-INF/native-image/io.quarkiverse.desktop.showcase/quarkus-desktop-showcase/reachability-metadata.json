@@ -1,4 +1,17 @@
 {
+  "reflection": [
+    {
+      "type": "java.lang.Integer",
+      "methods": [
+        { "name": "parseInt", "parameterTypes": [ "java.lang.String" ] },
+        { "name": "valueOf", "parameterTypes": [ "java.lang.String" ] }
+      ]
+    },
+    {
+      "type": "java.lang.Math",
+      "methods": [ { "name": "max", "parameterTypes": [ "int", "int" ] } ]
+    }
+  ],
   "resources": [
     { "glob": "META-INF/services/javax.imageio.spi.ImageReaderSpi" },
     { "glob": "META-INF/services/javax.imageio.spi.ImageWriterSpi" },

@@ -5,9 +5,14 @@ import java.beans.XMLDecoder;
 import java.beans.XMLEncoder;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -64,7 +69,31 @@ public final class XmlSupport {
         String xml = new String(out.toByteArray(), StandardCharsets.UTF_8)
                 .replaceFirst("<java version=\"[^\"]*\"", "<java version=\"(normalized)\"")
                 .replace("\r\n", "\n");
-        return new Encoded(xml, List.copyOf(exceptions));
+        Encoded encoded = new Encoded(xml, List.copyOf(exceptions));
+        dump(encoded);
+        return encoded;
+    }
+
+    private static final AtomicInteger DUMPED = new AtomicInteger();
+
+    /**
+     * Debugging aid : with {@code -Dshowcase.beans.dump-dir=<directory>}, every encoded XML text is written to
+     * {@code <directory>/<sequence>-<sha256 prefix>.xml}, to diff the XML of two runtimes.
+     */
+    private static void dump(Encoded encoded) {
+        String directory = System.getProperty("showcase.beans.dump-dir");
+        if (directory == null) {
+            return;
+        }
+        try {
+            Path dir = Path.of(directory);
+            Files.createDirectories(dir);
+            String exceptions = encoded.exceptions().isEmpty() ? "" : "\n<!-- " + encoded.exceptions() + " -->\n";
+            Files.writeString(dir.resolve(String.format("%02d-%s.xml", DUMPED.incrementAndGet(), encoded.sha256())),
+                    encoded.xml() + exceptions, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     public static Encoded encode(Object... objects) {
@@ -88,6 +117,9 @@ public final class XmlSupport {
             }
         } catch (Throwable t) {
             exceptions.add("thrown: " + Checks.describe(t));
+        }
+        if (!exceptions.isEmpty()) {
+            dump(new Encoded("<!-- decoding exceptions of " + Checks.sha256(xml) + " -->", exceptions));
         }
         return new Decoded(List.copyOf(objects), List.copyOf(exceptions));
     }

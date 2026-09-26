@@ -75,6 +75,9 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
 - `--awt-only` runs the awt-only variant (`target/awt-only`). `--screen` also saves a Robot screen capture of the
   window per page (`<page>--screen.png`, reported as `SCREEN`, never a mismatch).
 - `--trace` (JVM only) runs under the GraalVM tracing agent (`comparison/<label>/metadata`), see below.
+- `-- -Dshowcase.beans.dump-dir=<directory>` writes every XML text that the JavaBeans pages encode (and the decoding
+  exceptions) to `<directory>/<sequence>-<sha256>.xml`: run it with one directory per runtime, then diff them when an
+  `XML : lines, SHA-256` check differs.
 
 `java tools/Cycle.java <label> [--trace] [--exact] [--awt-only] [--hidpi] [--pages=...] [--offline] [--skip-jvm]
 [--skip-native-build] [--maven-args=a,b] [--native-args=a,b] [-- options]` runs a whole iteration: JVM build and
@@ -105,6 +108,12 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   property editors, look and feels and UI delegates created by name, formatter value classes, serializable clipboard
   payloads, and the service providers of its ImageIO plugin, whose `META-INF/services` files and metadata format bundle
   are listed in `META-INF/native-image/io.quarkiverse.desktop.showcase/quarkus-desktop-showcase/reachability-metadata.json`;
+- registers the JDK methods that its JavaBeans pages call by name (`Expression(Integer.class, "parseInt")`,
+  `(Math.class, "max")`, `<object class="java.lang.Integer" method="valueOf">` in `decoder-elements.xml`), in the same
+  `reachability-metadata.json`, and one proxy class per listener interface of `EventHandler` (`@RegisterForProxy`);
+- enables the JavaBeans registration of the JDK Swing classes (`quarkus.desktop.swing.java-beans.jdk-classes=true`; the
+  AWT one, `quarkus.desktop.awt.java-beans.jdk-classes`, is enabled by default): the beans pages introspect, encode and
+  decode AWT and Swing components;
 - never creates AWT or Swing objects in the static initializer of a class that is not itself an AWT/Swing subclass
   (Quarkus initializes application classes at build time, AWT and Swing classes at run time).
 

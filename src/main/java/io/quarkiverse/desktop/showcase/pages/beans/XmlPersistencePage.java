@@ -240,7 +240,11 @@ public class XmlPersistencePage implements FeaturePage {
                 Collections.unmodifiableMap(new TreeMap<>(Map.of("k", "v"))),
                 table,
                 sorted,
-                new int[][] { { 1, 2 }, { 3 } },
+                // outside the Integer cache (-128..127) : the boxed elements are new objects in both runtimes. A
+                // native executable boxes the elements of a primitive array with Integer.valueOf (the JVM does not), so
+                // small values would be the cached instances of the TextAttribute constants that the encoder writes by
+                // field name (see overview-native-limits)
+                new int[][] { { 1000, 2000 }, { 3000 } },
                 new Font(attributes)));
     }
 
