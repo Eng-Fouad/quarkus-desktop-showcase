@@ -8,6 +8,7 @@ import java.awt.SystemTray;
 import java.awt.Taskbar;
 import java.awt.Toolkit;
 import java.awt.geom.AffineTransform;
+import java.awt.im.InputContext;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -68,6 +69,9 @@ public final class Environment {
             env.put("defaultTransform", Checks.num(tx.getScaleX(), 2) + "x" + Checks.num(tx.getScaleY(), 2));
             env.put("screenResolution", toolkit.getScreenResolution());
             env.put("fontHints", fontHints(toolkit));
+            // the keyboard layout changes the rendering (Windows lays native controls and menus out right to left for
+            // an Arabic or Hebrew layout) and the characters Robot types : runs are comparable with the same one only
+            env.put("inputLocale", inputLocale());
         }
         env.put("fontFamilies", Platforms.installedFamilies().size());
         env.put("lookAndFeel", "none");
@@ -79,6 +83,15 @@ public final class Environment {
             env.put("desktopFeatures", desktopFeatures());
         }
         return env;
+    }
+
+    private static String inputLocale() {
+        try {
+            Locale locale = InputContext.getInstance().getLocale();
+            return locale == null ? "none" : locale.toLanguageTag();
+        } catch (Throwable t) {
+            return "error: " + Checks.describe(t);
+        }
     }
 
     private static String property(String name) {

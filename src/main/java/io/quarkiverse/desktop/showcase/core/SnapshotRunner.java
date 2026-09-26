@@ -64,6 +64,8 @@ public class SnapshotRunner {
 
     private final Map<String, List<String>> uncaught = Collections.synchronizedMap(new LinkedHashMap<>());
     private volatile String currentPageId = "_startup";
+    /** The environment of the intermediate reports. */
+    private Map<String, Object> environment;
 
     void onStartup(@Observes StartupEvent event) {
         if (enabled()) {
@@ -102,7 +104,11 @@ public class SnapshotRunner {
                 .thenRunAsync(() -> writeImage(Snapshots.render(window.rootContent(), scale), out.resolve("_main-window.png")),
                         Edt.EDT);
         for (FeaturePage page : pages) {
-            chain = chain.thenComposeAsync(v -> capture(window, page, out), Edt.EDT).thenAccept(results::add);
+            chain = chain.thenComposeAsync(v -> capture(window, page, out), Edt.EDT).thenAccept(result -> {
+                results.add(result);
+                // written after every page too : a run that crashes (e.g. a native executable) still has a report
+                writeReport(out, results, false);
+            });
         }
         chain.whenCompleteAsync((v, error) -> {
             if (error != null) {
@@ -114,7 +120,7 @@ public class SnapshotRunner {
             } catch (Throwable t) {
                 LOG.error("Failed to dispose the last page", t);
             }
-            writeReport(out, results);
+            writeReport(out, results, true);
             long failed = results.stream().filter(r -> !((List<?>) r.get("errors")).isEmpty()).count();
             LOG.infof("Snapshot run finished : %d pages, %d with errors", results.size(), failed);
             if (exit) {
@@ -134,7 +140,7 @@ public class SnapshotRunner {
         if (enabled()) {
             uncaught.computeIfAbsent("_startup", id -> Collections.synchronizedList(new ArrayList<>()))
                     .add("start: " + Checks.describe(error));
-            writeReport(Path.of(dir.orElseThrow()).toAbsolutePath(), List.of());
+            writeReport(Path.of(dir.orElseThrow()).toAbsolutePath(), List.of(), true);
         }
     }
 
@@ -189,6 +195,8 @@ public class SnapshotRunner {
 
     private CompletionStage<Map<String, Object>> capturePage(MainWindow window, FeaturePage page, Path out,
             Map<String, Object> result, List<String> errors, long start) {
+        // the last page started before a crash is the one without an "ok" / "error(s)" line
+        LOG.infof("%-40s started", page.id());
         window.select(page);
         Component content = window.currentContent();
         Throwable buildError = window.currentError();
@@ -292,13 +300,22 @@ public class SnapshotRunner {
         }
     }
 
-    private void writeReport(Path out, List<Map<String, Object>> pages) {
+    /**
+     * Writes report.json. The environment is described once for the intermediate reports (written after every page) and
+     * again for the final one ({@code complete}), at the end of the run.
+     */
+    private void writeReport(Path out, List<Map<String, Object>> pages, boolean complete) {
         Map<String, Object> report = new LinkedHashMap<>();
-        try {
-            report.putAll(Environment.describe());
-        } catch (Throwable t) {
-            report.put("environmentError", Checks.describe(t));
+        if (complete || environment == null) {
+            Map<String, Object> env = new LinkedHashMap<>();
+            try {
+                env.putAll(Environment.describe());
+            } catch (Throwable t) {
+                env.put("environmentError", Checks.describe(t));
+            }
+            environment = env;
         }
+        report.putAll(environment);
         report.put("pages", pages);
         Map<String, Object> other = new LinkedHashMap<>(uncaught);
         pages.forEach(p -> other.remove((String) p.get("id")));
