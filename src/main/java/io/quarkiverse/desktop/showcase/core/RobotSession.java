@@ -20,7 +20,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntPredicate;
 
 /**
  * Robot input for the pages that need the focus ({@link FeaturePage#needsFocus()}), from a background thread only
@@ -28,9 +30,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * for).
  * <p>
  * Safety : every key press and mouse button press is preceded by a check that a showcase window is focused and that no
- * other process owns the foreground ({@link Edt#ownsFocus()}), otherwise it is skipped (the method returns
- * {@code false} and {@link #skipped()} lists it); everything pressed is released and the mouse pointer is moved back
- * when the session is closed.
+ * other process owns the foreground ({@link Edt#ownsFocus()}), waiting up to {@link #FOCUS_WAIT_MILLIS} for the focus
+ * to come back ({@link Edt#awaitFocus} : X11 moves the focus with FocusOut then FocusIn, Windows has no foreground
+ * window during an activation change), otherwise it is skipped (the method returns {@code false} and
+ * {@link #skipped()} lists it); everything pressed is released and the mouse pointer is moved back when the session is
+ * closed.
  * <p>
  * Keyboard input waits for each key to be processed : after a press (a release), the next input is only sent once the
  * {@code KEY_PRESSED} ({@code KEY_RELEASED}) event of that key was dispatched on the EDT (at most
@@ -38,11 +42,22 @@ import java.util.concurrent.atomic.AtomicInteger;
  * the key : a Shift pressed too early turns "a" into "A", a Ctrl released too early turns a copy drag into a move. Keys
  * that Java never sees (a native menu or drag loop consumes them) are sent with {@link #nativeKeys(boolean)} : a fixed
  * delay instead.
+ * <p>
+ * Screen pixels tell whether a window is on screen : {@link #pixelIs} right before a click, {@link #waitForPixel} until
+ * a new window is painted (X11 shows the unpainted native background until the first paint), {@link #raiseUntil} to
+ * bring a window above the always-on-top windows that cover it (without a window manager, X11 keeps them in the order
+ * they were mapped ; a window manager restacking its windows may cover an override-redirect POPUP), and
+ * {@link #awaitVisible} for the probes of a page covered by other applications. On macOS they need the Screen Recording
+ * permission (TCC) : when it is known to be denied ({@code macos.tcc.screenCapture = false}) the waits end at the
+ * first mismatch.
  */
 public final class RobotSession implements AutoCloseable {
 
     /** The longest wait for the event of a key press or release. */
     public static final long KEY_WAIT_MILLIS = 1000;
+
+    /** How long a key or mouse button press waits for the focus to come back to a showcase window. */
+    public static final long FOCUS_WAIT_MILLIS = 500;
 
     /** Dispatched key events : (id, key code) to count. Updated on the EDT, read by the Robot threads. */
     private static final Map<Long, AtomicInteger> DISPATCHED = new ConcurrentHashMap<>();
@@ -177,7 +192,7 @@ public final class RobotSession implements AutoCloseable {
      * @return {@code false} (nothing pressed) when no showcase window is focused
      */
     public boolean keyPress(int keyCode) {
-        if (!Focus.await(Edt::ownsFocus, 500)) {
+        if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
             skipped.add("key " + KeyEvent.getKeyText(keyCode));
             return false;
         }
@@ -242,12 +257,12 @@ public final class RobotSession implements AutoCloseable {
 
     /**
      * Presses the mouse buttons {@code mask} ({@link java.awt.event.InputEvent#BUTTON1_DOWN_MASK}...) if a showcase
-     * window is focused.
+     * window is focused (waiting a moment for the focus to come back).
      *
      * @return {@code false} (nothing pressed) when no showcase window is focused
      */
     public boolean press(int mask) {
-        if (!Focus.await(Edt::ownsFocus, 500)) {
+        if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
             skipped.add("mouse press");
             return false;
         }
@@ -314,6 +329,67 @@ public final class RobotSession implements AutoCloseable {
     }
 
     /**
+     * Waits up to {@code timeoutMillis} until the screen pixel at {@code p} has the color {@code rgb} : a new window is
+     * mapped and painted (X11 shows its unpainted native background until the first paint, slower on a busy machine).
+     * Raises no window and records nothing in {@link #skipped()}.
+     *
+     * @return {@code true} once the pixel has the color
+     */
+    public boolean waitForPixel(Point p, int rgb, long timeoutMillis) {
+        return waitForPixel(p, found -> found == (rgb & 0xFFFFFF), timeoutMillis);
+    }
+
+    /**
+     * Waits up to {@code timeoutMillis} until {@code expected} accepts the screen pixel at {@code p} (RGB, no alpha),
+     * polling every 50 ms ({@link Robot#waitForIdle()} in between unless {@link #idleAfterInput(boolean) idleAfterInput
+     * (false)}).
+     *
+     * @return {@code true} once the pixel is accepted
+     */
+    public boolean waitForPixel(Point p, IntPredicate expected, long timeoutMillis) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (true) {
+            int found = pixel(p);
+            if (expected.test(found)) {
+                return true;
+            }
+            lastMismatch = rgb(found) + " at " + p.x + "," + p.y;
+            if (System.nanoTime() - deadline > 0 || MacEnvironment.screenCaptureDenied()) {
+                return false;
+            }
+            robot.delay(50);
+            if (idleAfterInput) {
+                idle();
+            }
+        }
+    }
+
+    /**
+     * Brings {@code window} to the front ({@code toFront} only) while the screen pixel at {@code p} shows it covered,
+     * until {@code visible} accepts that pixel : each check waits up to {@code waitMillis} ({@link #waitForPixel}), at
+     * most {@code maxRaises} raises. Unlike {@link #awaitVisible} a negative probe works (e.g. "not the color of the
+     * backdrop" when the content varies). A focused window may still be covered : always-on-top windows keep the order
+     * they were mapped in without a window manager (X11), and a window manager restacking the windows it manages may
+     * cover an override-redirect window (Window.Type.POPUP) it does not manage.
+     *
+     * @return the number of raises it took ({@code 0} : visible at once), {@code -1} if still covered
+     */
+    public int raiseUntil(Window window, Point p, IntPredicate visible, int maxRaises, long waitMillis) throws Exception {
+        for (int raises = 0;; raises++) {
+            if (waitForPixel(p, visible, waitMillis)) {
+                return raises;
+            }
+            if (raises >= maxRaises) {
+                return -1;
+            }
+            Focus.onEdt(() -> {
+                window.toFront();
+                return null;
+            });
+        }
+    }
+
+    /**
      * Waits until the screen pixels at {@code probes} have their expected colors ({@code probes} maps a point to an
      * RGB color), i.e. until the page is visible on screen : windows of other applications (or other showcase
      * processes) may cover it. The window of {@code component} is brought to the front between the attempts.
@@ -362,8 +438,8 @@ public final class RobotSession implements AutoCloseable {
     }
 
     /**
-     * The last pixel that did not have its expected color in {@link #awaitVisible} (for diagnostics : it depends on the
-     * windows of the desktop, never put it in a check value).
+     * The last pixel that did not have its expected color in {@link #awaitVisible}, {@link #waitForPixel} or
+     * {@link #raiseUntil} (for diagnostics : it depends on the windows of the desktop, never put it in a check value).
      */
     public String lastMismatch() {
         return lastMismatch;

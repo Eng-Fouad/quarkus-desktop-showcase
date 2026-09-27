@@ -26,6 +26,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -132,6 +133,28 @@ public final class Edt {
     }
 
     /**
+     * Completes (on the EDT) once {@code value}, evaluated on the EDT every 20 ms, kept an equal value for
+     * {@code quietMillis}, or exceptionally with a {@link TimeoutException} after {@code timeoutMillis} : e.g. the
+     * bounds of a window that the window manager configures in several steps (X11 : a maximized frame, then its frame
+     * extents).
+     */
+    public static CompletionStage<Void> untilStable(Supplier<?> value, long quietMillis, long timeoutMillis, String what) {
+        Object[] last = { new Object() }; // equal to no value : the first evaluation starts the quiet period
+        long[] since = { 0 };
+        long quiet = TimeUnit.MILLISECONDS.toNanos(quietMillis);
+        return until(() -> {
+            Object current = value.get();
+            long now = System.nanoTime();
+            if (!Objects.equals(current, last[0])) {
+                last[0] = current;
+                since[0] = now;
+                return false;
+            }
+            return now - since[0] > quiet;
+        }, timeoutMillis, what);
+    }
+
+    /**
      * Completes (on the EDT) once {@code component} renders the same pixels 3 times in a row (rendered with
      * {@link Snapshots#render} every 50 ms), or after {@code timeoutMillis} (never exceptionally : the timeout only
      * ends the wait).
@@ -208,6 +231,42 @@ public final class Edt {
     public static boolean ownsFocus() {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() != null
                 && !Boolean.FALSE.equals(Foreground.thisProcess());
+    }
+
+    /**
+     * {@link #ownsFocus()}, waiting up to {@code timeoutMillis} for the focus to come back (off the EDT only : on the EDT
+     * it answers at once, it never sleeps there). While the window manager or the operating system moves the focus (a
+     * click on a window, an activation), the application briefly has no focused window : X11 sends FocusOut, then
+     * FocusIn ; Windows has no foreground window during an activation change ({@link Foreground#thisProcess()} is
+     * {@code FALSE} then). Nothing is typed meanwhile, and nothing when the focus does not come back : this is the wait
+     * of {@link RobotSession} before each key and mouse button press ({@link RobotSession#FOCUS_WAIT_MILLIS}).
+     */
+    public static boolean awaitFocus(long timeoutMillis) {
+        return awaitFocus(timeoutMillis, () -> true);
+    }
+
+    /**
+     * {@link #awaitFocus(long)} for a focus that must also satisfy {@code also}, e.g. a text field owning the focus (it
+     * gains the focus back after its window).
+     */
+    public static boolean awaitFocus(long timeoutMillis, BooleanSupplier also) {
+        BooleanSupplier focused = () -> ownsFocus() && also.getAsBoolean();
+        if (focused.getAsBoolean() || isEdt()) {
+            return focused.getAsBoolean();
+        }
+        long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (System.nanoTime() - end < 0) {
+            try {
+                Thread.sleep(POLL_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            if (focused.getAsBoolean()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static synchronized ScheduledExecutorService scheduler() {

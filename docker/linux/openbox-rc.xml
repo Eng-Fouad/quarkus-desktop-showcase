@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The configuration of the window manager of the showcase container (xvfb-exec). Windows are activated by the
+  applications (_NET_ACTIVE_WINDOW : toFront, requestFocus), never by the mouse or the keyboard : no key or mouse
+  bindings, so that the Robot input of the pages only goes to the applications. The default bindings of openbox grab
+  the mouse buttons on every window to focus and raise it on a click, and a quick second click (a Robot double click)
+  was lost now and then.
+-->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+  </focus>
+  <placement>
+    <policy>Smart</policy>
+    <center>no</center>
+  </placement>
+  <theme>
+    <name>Clearlooks</name>
+    <titleLayout>NLIMC</titleLayout>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>no</animateIconify>
+  </theme>
+  <desktops>
+    <number>1</number>
+  </desktops>
+  <keyboard>
+  </keyboard>
+  <mouse>
+  </mouse>
+</openbox_config>

@@ -41,11 +41,14 @@ import java.util.stream.Stream;
  * jdk.accessibility ({@code jrt:/} of the JDK running the tool) and the packages of these modules. List entries are
  * class names, package names (covering their classes and sub packages), {@code "fqcn#name(paramType,...)"} methods and
  * {@code "fqcn#field"} fields, per the naming convention {@code [WINDOWS_|LINUX_|MAC_]<KIND>} of static String[] fields.
+ * The constants of the extension code are read too : the classes registered for serialization ({@code *SERIALIZABLE*})
+ * and the resource bundles that the JDK looks up but does not have ({@code ABSENT_RESOURCE_BUNDLES}).
  * <p>
  * Output (Markdown, on stdout) : the agent-recorded accesses (JNI, reflection, resources, resource bundles,
  * serialization, dynamic proxies) that the lists do not cover, grouped by kind ; names also found in the constant pool
  * of quarkus-awt's {@code AwtProcessor} (registered by io.quarkus:quarkus-awt, heuristic) ; platform entries not used by
- * the run ; and list entries that do not exist in this JDK (stale, typos, or another platform).
+ * the run ; lookups of classes and resources that do not exist in this JDK ; and list entries that do not exist in this
+ * JDK (stale, typos, or another platform).
  */
 public class MetadataDiff {
 
@@ -107,7 +110,9 @@ public class MetadataDiff {
             Map<String, String[]> lists = readLists(jar, extension[1]);
             sources.add(jar + " (" + Files.getLastModifiedTime(jar) + ") : " + lists.size() + " lists");
             reg.add(extension[2], lists, platform);
-            reg.serializable.addAll(serializableClasses(jar, extension[1]));
+            reg.serializable.addAll(constantValues(jar, extension[1], "SERIALIZABLE"));
+            // bundles that the JDK looks up but does not have, registered so that the lookup fails as in the JVM
+            reg.bundles.addAll(constantValues(jar, extension[1], "ABSENT_RESOURCE_BUNDLES"));
         }
         Path awtDeployment = M2.resolve("io/quarkus/quarkus-awt-deployment/" + quarkusVersion + "/quarkus-awt-deployment-"
                 + quarkusVersion + ".jar");
@@ -209,6 +214,7 @@ public class MetadataDiff {
         }
 
         Set<String> missingResources = new TreeSet<>();
+        Set<String> absentResources = new TreeSet<>();
         Set<String> missingBundles = new TreeSet<>();
         for (Object o : (List<?>) md.getOrDefault("resources", List.of())) {
             Map<String, Object> entry = map(o);
@@ -233,6 +239,12 @@ public class MetadataDiff {
                 byQuarkusAwt.put("resource " + glob, "");
                 continue;
             }
+            if (samePlatform && module != null && !universe.resources.contains(glob)) {
+                // a resource of a desktop module that the JDK looks for but does not have (Beans.instantiate probes
+                // java/awt/Button.ser, SwingUtilities2.makeIcon the icons of every look and feel class up to Basic)
+                absentResources.add(glob + " (module " + module + ")");
+                continue;
+            }
             missingResources.add(glob + (module != null ? " (module " + module + ")" : ""));
         }
 
@@ -248,6 +260,8 @@ public class MetadataDiff {
         list("Lookups of classes that do not exist in this JDK (expected to fail : only an issue with "
                 + "--exact-reachability-metadata)", negativeLookups);
         list("Resources not included", missingResources);
+        list("Lookups of resources that do not exist in this JDK (a native executable finds none either)",
+                absentResources);
         list("Resource bundles not included", missingBundles);
         list("Serialization of desktop types (no list kind : the *SERIALIZABLE* constants of the extension code)",
                 serialization);
@@ -287,15 +301,16 @@ public class MetadataDiff {
     }
 
     /**
-     * The classes registered for serialization by the extension code : the static {@code String} and {@code List} fields
-     * of {@code className} whose name contains {@code SERIALIZABLE}.
+     * The values of the static {@code String} and {@code List} fields of {@code className} whose name contains
+     * {@code fragment} : the classes registered for serialization by the extension code ({@code SERIALIZABLE}), the
+     * absent resource bundles it registers ({@code ABSENT_RESOURCE_BUNDLES}).
      */
-    static Set<String> serializableClasses(Path jar, String className) throws Exception {
+    static Set<String> constantValues(Path jar, String className, String fragment) throws Exception {
         Set<String> classes = new TreeSet<>();
         try (URLClassLoader cl = new URLClassLoader(new URL[] { jar.toUri().toURL() }, ClassLoader.getPlatformClassLoader())) {
             Class<?> c = Class.forName(className, true, cl);
             for (Field f : c.getDeclaredFields()) {
-                if (Modifier.isStatic(f.getModifiers()) && f.getName().contains("SERIALIZABLE")) {
+                if (Modifier.isStatic(f.getModifiers()) && f.getName().contains(fragment)) {
                     f.setAccessible(true);
                     Object value = f.get(null);
                     if (value instanceof String s) {

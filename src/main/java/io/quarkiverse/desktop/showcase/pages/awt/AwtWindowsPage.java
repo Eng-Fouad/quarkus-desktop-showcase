@@ -75,6 +75,7 @@ public class AwtWindowsPage implements FeaturePage {
     private static final int CELL_HEIGHT = 280;
     private static final int MARGIN = 20;
     private static final int BACKDROP = 0xDDE3EA;
+    private static final int POPUP_COLOR = 0xFFFDE7;
     private static final int OPACITY_COLOR = 0x1565C0;
     private static final float OPACITY = 0.6f;
     private static final int SHAPE_COLOR = 0x2E7D32;
@@ -407,7 +408,7 @@ public class AwtWindowsPage implements FeaturePage {
         show(utility);
         Window popup = new Window(iconFrame);
         popup.setType(Window.Type.POPUP);
-        popup.add(label("Window.Type.POPUP", 0xFFFDE7, 0x5D4037));
+        popup.add(label("Window.Type.POPUP", POPUP_COLOR, 0x5D4037));
         popup.setBounds(inner(cell(area, 5)));
         show(popup);
 
@@ -476,6 +477,7 @@ public class AwtWindowsPage implements FeaturePage {
                 .thenCompose(v -> state(states, Frame.ICONIFIED, stateLog))
                 .thenCompose(v -> state(states, Frame.NORMAL, stateLog))
                 .thenCompose(v -> state(states, Frame.MAXIMIZED_BOTH, stateLog))
+                .thenCompose(v -> stableBounds(states))
                 .thenCompose(v -> {
                     List<Check> stateChecks = new ArrayList<>();
                     // the frame states need a window manager supporting them (Linux : not under a bare X server)
@@ -520,6 +522,14 @@ public class AwtWindowsPage implements FeaturePage {
                 .thenCompose(v -> Edt.background(() -> {
                     try (RobotSession robot = RobotSession.open()) {
                         robot.idle();
+                        // X11 : the POPUP window is an override-redirect window, which the window manager does not
+                        // manage : when it restacks the always-on-top windows it manages (the page window focused
+                        // again above), they may cover it
+                        if (Platforms.isLinux()) {
+                            Rectangle popupBounds = inner(cell(area, 5));
+                            Point popupCenter = new Point((int) popupBounds.getCenterX(), popupBounds.y + 30);
+                            robot.raiseUntil(popup, popupCenter, rgb -> rgb == POPUP_COLOR, 5, 300);
+                        }
                         return robot.capture(area);
                     }
                 }))
@@ -561,6 +571,14 @@ public class AwtWindowsPage implements FeaturePage {
         }, 3000, "frame state " + AwtSupport.frameState(state))
                 .handle((v, error) -> null)
                 .thenCompose(v -> Edt.delay(300));
+    }
+
+    /**
+     * Waits (at most 2 s) until the bounds of {@code window} did not change for 300 ms : on X11 the window manager
+     * configures a maximized frame, then its frame extents, in several steps after the state change.
+     */
+    private static CompletionStage<Void> stableBounds(Window window) {
+        return Edt.untilStable(window::getBounds, 300, 2000, "stable bounds").handle((v, error) -> null);
     }
 
     private static Rectangle cell(Rectangle area, int index) {

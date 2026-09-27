@@ -554,6 +554,8 @@ public class DragAndDropPage implements FeaturePage {
                         log.dragImage = "used";
                         e.startDrag(null, dragImage(i), new Point(-24, -24), t, this);
                     } else {
+                        // X11 (XDnD) : no drag images
+                        log.dragImage = "unsupported";
                         e.startDrag(null, t, this);
                     }
                     return;

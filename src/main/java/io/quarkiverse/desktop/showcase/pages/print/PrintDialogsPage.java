@@ -31,6 +31,7 @@ import javax.accessibility.AccessibleAction;
 import javax.accessibility.AccessibleContext;
 import javax.print.DocFlavor;
 import javax.print.PrintService;
+import javax.print.PrintServiceLookup;
 import javax.print.ServiceUI;
 import javax.print.StreamPrintService;
 import javax.print.attribute.HashPrintRequestAttributeSet;
@@ -49,6 +50,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.a11y.AccessibleDump;
@@ -66,7 +68,9 @@ import io.quarkiverse.desktop.showcase.pages.a11y.AccessibleDump;
  * accessible contexts (tabs, buttons, mnemonics, icons : this AWT page cannot reference Swing classes), then cancelled
  * programmatically by the accessible action of its Cancel button : nothing is ever printed. The print dialog of the
  * {@code PrinterJob} lists the stream print services only (the job prints to a PostScript stream), the AWT
- * {@code PrintJob} dialog lists the printers of the machine.
+ * {@code PrintJob} dialog lists the printers of the machine ; on a machine without any printer (a Linux container
+ * without CUPS) it is the "no print service" message of {@code ServiceDialog} instead. Outside Windows the print dialog
+ * has an output tray combo box.
  * <p>
  * The native Windows print and page setup dialogs cannot be closed programmatically : they are only opened with
  * {@code -Dshowcase.interactive=true}.
@@ -310,6 +314,9 @@ public class PrintDialogsPage implements FeaturePage {
         List<Check> checks = new ArrayList<>();
         boolean pageSetup = key.equals("pageDialog");
         boolean printers = key.equals("printJob");
+        if (printers && PrintServiceLookup.lookupPrintServices(null, null).length == 0) {
+            return noPrintService(key, dialog);
+        }
         checks.add(Checks.expect(key + " : dialog", "sun.print.ServiceDialog \"" + (pageSetup ? "Page Setup" : "Print")
                 + "\" APPLICATION_MODAL", () -> dialog.getClass().getName() + " \"" + dialog.getTitle() + "\" "
                         + dialog.getModalityType()));
@@ -325,7 +332,9 @@ public class PrintDialogsPage implements FeaturePage {
                 () -> String.join(", ", AccessibleDump.names(dialog, "radio button"))));
         checks.add(Checks.expect(key + " : check boxes", pageSetup ? "" : "Print To File, Collate, Banner Page",
                 () -> String.join(", ", AccessibleDump.names(dialog, "check box"))));
-        checks.add(Checks.expect(key + " : combo boxes", pageSetup ? 2 : 3,
+        // outside Windows, the Appearance tab has an output tray combo box (ServiceDialog.OutputPanel)
+        boolean outputTrays = !Platforms.isWindows();
+        checks.add(Checks.expect(key + " : combo boxes", pageSetup ? 2 : outputTrays ? 4 : 3,
                 () -> AccessibleDump.byRole(dialog, "combo box").size()));
         // the orientation icons are PNG resources of sun.print
         checks.add(Checks.expect(key + " : icons", pageSetup ? "4 x 41x24" : "7 x 41x24 41x41", () -> {
@@ -346,12 +355,33 @@ public class PrintDialogsPage implements FeaturePage {
         checks.add(Checks.expect(key + " : mnemonics", pageSetup ? pageMnemonics
                 : "Name: N, Properties... R, Print To File F, All L, Pages E, Number of copies: O, Collate C, "
                         + pageMnemonics + ", Monochrome M, Color C, Draft F, Normal N, High H, One Side O, Tumble T, "
-                        + "Duplex D, Banner Page B, Priority: R, Job Name: J, User Name: U",
+                        + "Duplex D, Banner Page B, Priority: R, Job Name: J, User Name: U"
+                        + (outputTrays ? ", Output trays: P" : ""),
                 () -> mnemonics(dialog)));
         List<String> dump = AccessibleDump.dump(dialog);
         // the dialog of the AWT print job lists the printers of the machine
         String tree = dump.size() + " nodes, " + Checks.sha256(String.join("\n", dump));
         checks.add(printers ? Check.info(key + " : accessible tree", tree) : Check.pass(key + " : accessible tree", tree));
+        checks.add(Check.info(key + " : size", dialog.getWidth() + "x" + dialog.getHeight()));
+        return checks;
+    }
+
+    /**
+     * The message dialog of {@code ServiceDialog.showNoPrintService} (a {@code JOptionPane}), shown by the print dialog of
+     * {@code Toolkit.getPrintJob} when the machine has no printer.
+     */
+    private static List<Check> noPrintService(String key, Dialog dialog) {
+        List<Check> checks = new ArrayList<>();
+        checks.add(Check.info(key + " : print services", "none : the no print service message"));
+        checks.add(Checks.expect(key + " : dialog", "javax.swing.JDialog \"Message\" APPLICATION_MODAL",
+                () -> dialog.getClass().getName() + " \"" + dialog.getTitle() + "\" " + dialog.getModalityType()));
+        checks.add(Checks.expect(key + " : buttons", "OK", () -> String.join(", ", AccessibleDump.names(dialog,
+                "push button").stream().filter(name -> !name.isEmpty() && !name.equals("null")).toList())));
+        checks.add(Checks.expect(key + " : message", true,
+                () -> AccessibleDump.names(dialog, "label").contains("No print service found.")));
+        List<String> dump = AccessibleDump.dump(dialog);
+        checks.add(Check.pass(key + " : accessible tree",
+                dump.size() + " nodes, " + Checks.sha256(String.join("\n", dump))));
         checks.add(Check.info(key + " : size", dialog.getWidth() + "x" + dialog.getHeight()));
         return checks;
     }

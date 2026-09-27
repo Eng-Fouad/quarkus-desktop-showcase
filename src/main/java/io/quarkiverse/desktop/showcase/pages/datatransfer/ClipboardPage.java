@@ -241,7 +241,10 @@ public class ClipboardPage implements FeaturePage {
         checks.add(Checks.expect("encodeDataFlavor(payload flavor)",
                 "JAVA_DATAFLAVOR:application/x-java-serialized-object; class=" + ClipboardPayload.class.getName(),
                 () -> SystemFlavorMap.encodeDataFlavor(ClipboardData.payloadFlavor())));
-        checks.add(Checks.expect("custom native mapping (addUnencodedNativeForFlavor)", "[SHOWCASE_NATIVE] true", () -> {
+        // X11 : MIME types are natives too (XDataTransferer.getPlatformMappingsForFlavor), listed before the added one
+        String customNatives = Platforms.isLinux() ? "[application/x-showcase-custom, SHOWCASE_NATIVE]"
+                : "[SHOWCASE_NATIVE]";
+        checks.add(Checks.expect("custom native mapping (addUnencodedNativeForFlavor)", customNatives + " true", () -> {
             SystemFlavorMap m = (SystemFlavorMap) SystemFlavorMap.getDefaultFlavorMap();
             DataFlavor custom = ClipboardData.flavor("application/x-showcase-custom; class=java.io.InputStream");
             m.addUnencodedNativeForFlavor(custom, "SHOWCASE_NATIVE");

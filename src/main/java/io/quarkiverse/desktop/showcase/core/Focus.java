@@ -32,6 +32,15 @@ import org.jboss.logging.Logger;
  * the later attempts then click the title bar of a decorated window of the showcase, as a user would (a click
  * activates the window it lands on), only after checking that the window under the point belongs to this process, and
  * the mouse pointer is moved back. Bounded : {@link #MAX_ATTEMPTS} attempts.
+ * <p>
+ * The title bar click is Windows only : {@link Foreground} knows the foreground there only. On Linux and macOS the Java
+ * focus state is trusted and each attempt is {@code toFront} and {@code requestFocus}. On X11 they ask the window
+ * manager to activate the window (_NET_ACTIVE_WINDOW) : the Docker window manager of the showcase has no mouse
+ * bindings, a click would activate nothing there, and without a window manager a frame has no title bar at all. On
+ * macOS, {@code Desktop.requestForeground} is the opt-in {@code dock} side effect : never called here.
+ * <p>
+ * A window is also placed asynchronously : {@link #awaitPlaced} waits until its screen location is the requested one
+ * (X11 confirms a location after the focus, sometimes) before Robot coordinates are computed from it.
  */
 public final class Focus {
 
@@ -59,6 +68,17 @@ public final class Focus {
      */
     public static CompletionStage<Integer> acquire(Window window) {
         return Edt.background(() -> acquireBlocking(window));
+    }
+
+    /**
+     * Completes (on the EDT) with {@code true} once {@code window} is showing less than {@code tolerance} pixels away
+     * from {@code expected} on screen, {@code false} after {@code timeoutMillis}. On X11 the location of a window is
+     * known once the X server confirmed it (ConfigureNotify), which may come after the focus (a bare X server) : Robot
+     * coordinates computed from an older location land elsewhere. The tolerance covers the frame of a window manager.
+     */
+    public static CompletionStage<Boolean> awaitPlaced(Window window, Point expected, int tolerance, long timeoutMillis) {
+        return Edt.until(() -> window.isShowing() && window.getLocationOnScreen().distance(expected) < tolerance,
+                timeoutMillis, "window placed").handle((v, error) -> error == null);
     }
 
     /**
@@ -119,6 +139,10 @@ public final class Focus {
                 if (w.isShowing() && decorated(w)) {
                     Rectangle b = w.getBounds();
                     Insets insets = w.getInsets();
+                    if (insets.top <= 0) {
+                        // no title bar drawn around the window (no window manager) : the point would be in the page
+                        continue;
+                    }
                     // the caption : below the top border, above the client area ; the middle has no button
                     list.add(new Point(b.x + b.width / 2, b.y + Math.max(4, insets.top * 2 / 3)));
                 }

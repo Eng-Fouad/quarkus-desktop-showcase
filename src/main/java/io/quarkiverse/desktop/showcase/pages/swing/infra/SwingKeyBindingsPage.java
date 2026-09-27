@@ -83,6 +83,7 @@ import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -850,8 +851,13 @@ public class SwingKeyBindingsPage implements FeaturePage {
         }
     }
 
+    /**
+     * {@code true} when a showcase window is focused and the Robot field owns the focus, waiting a moment for the focus
+     * to come back (X11 moves it with FocusOut then FocusIn, the field gains it after its window : see
+     * {@link Edt#awaitFocus}, the same wait as {@link RobotSession} before each press).
+     */
     private static boolean sendable(Demo u) {
-        return Edt.ownsFocus() && u.robotFieldFocused.get();
+        return Edt.awaitFocus(RobotSession.FOCUS_WAIT_MILLIS, u.robotFieldFocused::get);
     }
 
     /**

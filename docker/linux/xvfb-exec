@@ -1,9 +1,29 @@
 #!/bin/sh
-# Starts a virtual X server, then runs the given command with DISPLAY set (xvfb-run hangs as PID 1).
-Xvfb :99 -screen 0 1920x1200x24 -nolisten tcp > /tmp/xvfb.log 2>&1 &
+# Starts a virtual X server and a window manager, then runs the given command with DISPLAY set (xvfb-run hangs as PID 1).
+#
+# The screen is 3840x2160 at 96 DPI (XVFB_SCREEN), the size of a 4K desktop : the secondary windows that the pages open
+# in the lower right part of the screen never overlap the main window. The window manager (SHOWCASE_WM, openbox by default,
+# "none" for a bare X server) keeps always-on-top windows above the others, activates the windows that the pages bring
+# to the front and reports the frame extents (insets), as the window manager of a Linux desktop does. A compositing
+# manager (SHOWCASE_COMPOSITOR, xcompmgr by default, "none" to leave it out) renders the translucent windows : AWT
+# reports window opacity as supported whenever the window manager supports _NET_WM_WINDOW_OPACITY.
+Xvfb :99 -screen 0 "${XVFB_SCREEN:-3840x2160x24}" -dpi 96 -nolisten tcp > /tmp/xvfb.log 2>&1 &
 export DISPLAY=:99
-for i in 1 2 3 4 5 6 7 8 9 10; do
+for i in $(seq 1 20); do
     [ -e /tmp/.X11-unix/X99 ] && break
     sleep 0.5
 done
+if [ "${SHOWCASE_WM:-openbox}" = openbox ]; then
+    # no key or mouse bindings : see openbox-rc.xml
+    openbox --config-file /etc/showcase/openbox-rc.xml > /tmp/openbox.log 2>&1 &
+    # managed once the window manager announces itself on the root window
+    for i in $(seq 1 20); do
+        xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
+        sleep 0.5
+    done
+    if [ "${SHOWCASE_COMPOSITOR:-xcompmgr}" = xcompmgr ]; then
+        xcompmgr > /tmp/xcompmgr.log 2>&1 &
+        sleep 1
+    fi
+fi
 exec "$@"

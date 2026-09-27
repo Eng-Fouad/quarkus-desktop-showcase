@@ -38,6 +38,14 @@ public final class MacEnvironment {
     }
 
     /**
+     * {@code true} when the Screen Recording permission was probed ({@code -Dshowcase.robot=true}) and is denied : the
+     * screen pixels never show the windows of the showcase, waiting for them is pointless.
+     */
+    static boolean screenCaptureDenied() {
+        return "false".equals(screenCapture);
+    }
+
+    /**
      * Adds the macOS keys (call it on the EDT, on macOS only).
      */
     static void describe(Map<String, Object> env) {

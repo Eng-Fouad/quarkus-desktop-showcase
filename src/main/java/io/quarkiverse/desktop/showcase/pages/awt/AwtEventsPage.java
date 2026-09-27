@@ -57,6 +57,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -769,6 +770,10 @@ public class AwtEventsPage implements FeaturePage {
                     return Edt.until(target::isFocusOwner, 3000, "target canvas focused")
                             .handle((v, error) -> error == null ? attempts : 0);
                 })
+                // X11 without window manager : the location of the frame is known once the X server confirmed it
+                // (ConfigureNotify), which may come after the focus ; the origin of the Robot coordinates is read then
+                .thenCompose(attempts -> Focus.awaitPlaced(frame, area.getLocation(), 64, 2000)
+                        .thenApply(placed -> attempts))
                 .thenCompose(focused -> {
                     if (focused == 0) {
                         return CompletableFuture.completedFuture(List.of(Check.attempts("target frame focused", 0),
@@ -817,9 +822,20 @@ public class AwtEventsPage implements FeaturePage {
         }
     }
 
-    /** Expected results of the Robot sequence (see {@link #results}). */
-    private static final List<String> EXPECTED_MOUSE = List.of("MOUSE_ENTERED (40,40)", "1 2 1",
-            "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1 clicks=1", "1 -2");
+    /**
+     * Expected mouse results of the Robot sequence (see {@link #results}) : the checks, and whether the sequence runs
+     * again ({@link #complete}). X11 resets the click count once the pointer moves away from the press point
+     * (XWindow.handleMotionNotify) : the release after the drag has none. Windows sends one wheel event per Robot call,
+     * X11 one per notch (a press and release of the wheel buttons). Computed at run time (Quarkus initializes this
+     * class at build time).
+     */
+    private static List<String> expectedMouse() {
+        boolean x11 = Platforms.isLinux();
+        return List.of("MOUSE_ENTERED (40,40)", "1 2 1",
+                "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1" + (x11 ? "" : " clicks=1"),
+                x11 ? "1 -1 -1" : "1 -2");
+    }
+
     private static final String EXPECTED_KEYS = "A Shift A Space Enter Left Home Ctrl B";
     /** Attempts of the Robot sequence : another application may take the foreground at any time. */
     private static final int ATTEMPTS = 3;
@@ -832,10 +848,11 @@ public class AwtEventsPage implements FeaturePage {
     private List<Check> drive(RecordingCanvas target, List<String> global, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
         try (RobotSession robot = RobotSession.open()) {
-            // the new frame is painted
+            // the new frame is painted (a slower first paint shows the background of the native window until then)
             robot.delay(300);
             robot.idle();
             Point probe = new Point(origin.x + CANVAS_WIDTH - 20, origin.y + 20);
+            robot.waitForPixel(probe, CANVAS_COLOR, 3000);
             Color seen = robot.robot().getPixelColor(probe.x, probe.y);
             checks.add(Checks.expect("Robot.getPixelColor inside the canvas", Checks.argb(0xFF000000 | CANVAS_COLOR),
                     () -> Checks.argb(seen.getRGB())));
@@ -855,17 +872,18 @@ public class AwtEventsPage implements FeaturePage {
             if (!robot.skipped().isEmpty()) {
                 checks.add(Check.info("skipped inputs", "skipped: " + String.join(", ", robot.skipped())));
             }
+            List<String> expectedMouse = expectedMouse();
             List<String> results = results(target.log, keys);
-            checks.add(Checks.expect("mouse enters the canvas", EXPECTED_MOUSE.get(0), () -> results.get(0)));
-            checks.add(Checks.expect("mouse clicks : click counts", EXPECTED_MOUSE.get(1), () -> results.get(1)));
-            checks.add(Checks.expect("drag : MOUSE_DRAGGED events, then the release", EXPECTED_MOUSE.get(2),
+            checks.add(Checks.expect("mouse enters the canvas", expectedMouse.get(0), () -> results.get(0)));
+            checks.add(Checks.expect("mouse clicks : click counts", expectedMouse.get(1), () -> results.get(1)));
+            checks.add(Checks.expect("drag : MOUSE_DRAGGED events, then the release", expectedMouse.get(2),
                     () -> results.get(2)));
             List<String> finalLog = new ArrayList<>(target.log);
             checks.add(Checks.expect("right button : popup trigger (Windows : on release, Linux : on press)",
                     io.quarkiverse.desktop.showcase.core.Platforms.isWindows() ? "MOUSE_RELEASED" : "MOUSE_PRESSED",
                     () -> finalLog.stream().filter(entry -> entry.contains("popupTrigger"))
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
-            checks.add(Checks.expect("wheel rotations", EXPECTED_MOUSE.get(3), () -> results.get(3)));
+            checks.add(Checks.expect("wheel rotations", expectedMouse.get(3), () -> results.get(3)));
             if (keys) {
                 checks.add(Checks.expect("pressed keys", EXPECTED_KEYS, () -> results.get(4)));
                 // the characters depend on the keyboard layout (Arabic letters with an Arabic layout)
@@ -888,7 +906,7 @@ public class AwtEventsPage implements FeaturePage {
      */
     private static boolean complete(List<String> log, boolean keys) {
         List<String> results = results(log, keys);
-        return results.subList(0, 4).equals(EXPECTED_MOUSE) && (!keys || results.get(4).equals(EXPECTED_KEYS))
+        return results.subList(0, 4).equals(expectedMouse()) && (!keys || results.get(4).equals(EXPECTED_KEYS))
                 && log.stream().anyMatch(entry -> entry.contains("popupTrigger"));
     }
 

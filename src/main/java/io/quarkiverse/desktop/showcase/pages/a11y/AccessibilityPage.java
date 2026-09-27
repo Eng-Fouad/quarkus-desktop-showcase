@@ -512,8 +512,12 @@ public class AccessibilityPage implements FeaturePage {
                             .map(p -> p.type().getName()).sorted().toList();
                     return providers.isEmpty() ? "none" : String.join(", ", providers);
                 }));
-        checks.add(Checks.info("javax.accessibility.assistive_technologies",
-                () -> String.valueOf(System.getProperty("javax.accessibility.assistive_technologies"))));
+        // unset (JVM) or empty (a native executable without the Java Access Bridge : quarkus-desktop empties it, the
+        // raw values are on the native limits page) : no assistive technology loaded either way
+        checks.add(Checks.info("javax.accessibility.assistive_technologies", () -> {
+            String technologies = System.getProperty("javax.accessibility.assistive_technologies");
+            return technologies == null || technologies.isBlank() ? "none" : technologies;
+        }));
         return checks;
     }
 

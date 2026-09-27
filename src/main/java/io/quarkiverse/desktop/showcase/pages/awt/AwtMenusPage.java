@@ -48,6 +48,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
@@ -69,6 +70,8 @@ public class AwtMenusPage implements FeaturePage {
 
     private static final int FRAME_WIDTH = 560;
     private static final int FRAME_HEIGHT = 380;
+    /** The opaque window behind the menu frame. */
+    private static final int BACKDROP = 0xCFD8DC;
 
     // per build state
     private MenuFrame menuFrame;
@@ -414,12 +417,8 @@ public class AwtMenusPage implements FeaturePage {
 
         return Edt.rounds(3)
                 .thenCompose(v -> shortcutChecks(m, checks))
-                .thenCompose(v -> {
-                    Frame bare = new Frame();
-                    bare.setBounds(frame.getBounds());
-                    bare.addNotify();
-                    Insets without = bare.getInsets();
-                    bare.dispose();
+                .thenCompose(v -> bareInsets(frame.getBounds()))
+                .thenCompose(without -> {
                     Insets with = frame.getInsets();
                     checks.add(Checks.expect("Frame insets : the menu bar adds to the top inset", "true, same left/right",
                             () -> (with.top > without.top) + ", " + (with.left == without.left && with.right == without.right
@@ -459,6 +458,31 @@ public class AwtMenusPage implements FeaturePage {
         });
     }
 
+    /**
+     * The insets of a frame without menu bar at {@code bounds}. The native peer computes them on Windows. On X11 they are
+     * guessed until the window manager has framed the window (_NET_FRAME_EXTENTS) : the frame is shown there (not
+     * focusable), until its insets are known.
+     */
+    private static CompletionStage<Insets> bareInsets(Rectangle bounds) {
+        Frame bare = new Frame();
+        bare.setBounds(bounds);
+        bare.addNotify();
+        Insets guessed = bare.getInsets();
+        if (!Platforms.isLinux()) {
+            bare.dispose();
+            return CompletableFuture.completedFuture(guessed);
+        }
+        bare.setFocusableWindowState(false);
+        bare.setAutoRequestFocus(false);
+        bare.setVisible(true);
+        return Edt.until(() -> bare.isShowing() && !bare.getInsets().equals(guessed), 2000, "frame extents")
+                .handle((v, error) -> {
+                    Insets insets = bare.getInsets();
+                    bare.dispose();
+                    return insets;
+                });
+    }
+
     private static void pressShortcut(Component target, int modifiersEx, int keyCode) {
         target.dispatchEvent(new KeyEvent(target, KeyEvent.KEY_PRESSED, 0, modifiersEx, keyCode, KeyEvent.CHAR_UNDEFINED));
         target.dispatchEvent(new KeyEvent(target, KeyEvent.KEY_RELEASED, 0, modifiersEx, keyCode, KeyEvent.CHAR_UNDEFINED));
@@ -475,7 +499,7 @@ public class AwtMenusPage implements FeaturePage {
         // an opaque window behind the frame : the captures never show the desktop (rounded corners, shadow)
         Rectangle behind = frame.getBounds();
         behind.grow(40, 40);
-        backdrop = new AwtSupport.SolidWindow(behind, 0xCFD8DC);
+        backdrop = new AwtSupport.SolidWindow(behind, BACKDROP);
         backdrop.setVisible(true);
         frame.setAlwaysOnTop(true);
         frame.setAutoRequestFocus(true);
@@ -526,20 +550,31 @@ public class AwtMenusPage implements FeaturePage {
         int next = rtl ? KeyEvent.VK_LEFT : KeyEvent.VK_RIGHT;
         checks.add(Check.info("keyboard layout (menu bar direction on Windows)", AwtSupport.inputLocale()
                 + (rtl ? ", right to left" : ", left to right")));
-        // the native menu loops consume the keys : Java sees no key event while a menu is open
+        // Windows : F10 selects the first menu of the bar, Down opens it on its first item. X11 (XMenuBarPeer) : F10
+        // opens the first menu on its first item, and the arrow keys open the next menu on its first item
+        boolean opensOnFirstItem = Platforms.isLinux();
+        String open = opensOnFirstItem ? "F10" : "F10, Down";
+        String view = opensOnFirstItem ? "F10, Right, Right, Enter" : "F10, Right, Right, Down, Enter";
+        // the native menu loops consume the keys (Windows menu loop, X11 menu grabs) : Java sees no key event while a
+        // menu is open
         try (RobotSession robot = RobotSession.open().nativeKeys(true)) {
             // the pointer away from the menus (a stationary pointer under a new menu highlights an item)
             robot.move(new Point(canvas.x + size.width - 8, canvas.y + size.height - 8));
             robot.delay(300);
+            // the frame above the backdrop : both are always on top, and without a window manager the X server keeps
+            // them in the order they were mapped (the backdrop last). The frame is focused (Focus.acquire) but may
+            // still be covered : raised again while the canvas center shows the backdrop (the content varies)
+            Point center = new Point(canvas.x + size.width / 2, canvas.y + size.height / 2);
+            robot.raiseUntil(m.frame, center, rgb -> rgb != BACKDROP, 5, 200);
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
 
-            // F10, Down : the File menu opens (the capture differs from the closed frame)
+            // F10 (, Down) : the File menu opens (the capture differs from the closed frame)
             BufferedImage file = null;
             int attempt = 0;
             while (file == null && attempt < ATTEMPTS && focused(robot, m)) {
                 attempt++;
-                if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN)) {
+                if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))) {
                     robot.delay(600);
                     BufferedImage captured = robot.capture(frame);
                     if (!Checks.sha256(captured).equals(Checks.sha256(closed))) {
@@ -550,18 +585,18 @@ public class AwtMenusPage implements FeaturePage {
                     closeMenus(robot);
                 }
             }
-            checks.add(Check.attempts("F10, Down", attempt));
+            checks.add(Check.attempts(open, attempt));
             if (file != null) {
                 BufferedImage opened = file;
                 images.put("file-menu", opened);
-                checks.add(Checks.expect("F10, Down : the File menu opens (capture differs)", true,
+                checks.add(Checks.expect(open + " : the File menu opens (capture differs)", true,
                         () -> !Checks.sha256(opened).equals(Checks.sha256(closed))));
                 if (robot.key(next) && robot.key(next)) {
                     robot.delay(600);
                     images.put("view-menu", robot.capture(frame));
                 }
             } else {
-                checks.add(Check.info("F10, Down : the File menu opens", "skipped: not focused"));
+                checks.add(Check.info(open + " : the File menu opens", "skipped: not focused"));
             }
             closeMenus(robot);
 
@@ -571,27 +606,28 @@ public class AwtMenusPage implements FeaturePage {
             boolean activated = false;
             while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
                 attempt++;
-                if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN) && robot.key(KeyEvent.VK_ENTER)) {
+                if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))
+                        && robot.key(KeyEvent.VK_ENTER)) {
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
                 if (!activated) {
                     closeMenus(robot);
                 }
             }
-            checks.add(Check.attempts("F10, Down, Enter", attempt));
+            checks.add(Check.attempts(open + ", Enter", attempt));
             if (activated) {
-                checks.add(Checks.expect("F10, Down, Enter : native activation of File > New", "action New",
+                checks.add(Checks.expect(open + ", Enter : native activation of File > New", "action New",
                         () -> String.join(", ", m.events)));
             } else {
-                checks.add(Check.info("F10, Down, Enter : native activation of File > New", "skipped: not focused"));
+                checks.add(Check.info(open + ", Enter : native activation of File > New", "skipped: not focused"));
             }
             m.events.clear();
             attempt = 0;
             activated = false;
             while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
                 attempt++;
-                if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next) && robot.key(KeyEvent.VK_DOWN)
-                        && robot.key(KeyEvent.VK_ENTER)) {
+                if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next)
+                        && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN)) && robot.key(KeyEvent.VK_ENTER)) {
                     // the item toggles once : never sent again once its event arrived
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
@@ -599,7 +635,7 @@ public class AwtMenusPage implements FeaturePage {
                     closeMenus(robot);
                 }
             }
-            checks.add(Check.attempts("F10, Right, Right, Down, Enter", attempt));
+            checks.add(Check.attempts(view, attempt));
             if (activated) {
                 checks.add(Checks.expect("native activation of View > Toolbar (CheckboxMenuItem)",
                         "item Toolbar DESELECTED, state false", () -> String.join(", ", m.events) + ", state "
@@ -636,8 +672,8 @@ public class AwtMenusPage implements FeaturePage {
 
     /**
      * {@code PopupMenu.show} : on Windows the peer tracks the menu synchronously (the calling thread waits until the menu
-     * is closed), so it is shown from a helper thread and closed with Escape (sent again while the menu stays open, at
-     * most {@link #ATTEMPTS} times).
+     * is closed), so it is shown from a helper thread and closed with Escape : sent once, then again while the helper
+     * thread waits (the menu stays open), at most {@link #ATTEMPTS} times. On X11 {@code show} returns at once.
      */
     private static void popup(MenuFrame m, RobotSession robot, Point canvas, Dimension size, List<Check> checks,
             Map<String, BufferedImage> images) throws Exception {
@@ -651,15 +687,17 @@ public class AwtMenusPage implements FeaturePage {
         robot.delay(700);
         images.put("popup-menu", robot.capture(new Rectangle(canvas.x, canvas.y, Math.min(size.width, 360),
                 Math.min(size.height, 300))));
+        // the first Escape is always sent : show() returns at once on X11 (XPopupMenuPeer maps the menu and grabs the
+        // input) and macOS, the menu is open all the same
         boolean escaped = false;
         int attempt = 0;
-        while (shower.isAlive() && attempt < ATTEMPTS) {
+        do {
             attempt++;
             if (robot.key(KeyEvent.VK_ESCAPE)) {
                 escaped = true;
             }
             shower.join(TimeUnit.SECONDS.toMillis(attempt == ATTEMPTS ? 3 : 1));
-        }
+        } while (shower.isAlive() && attempt < ATTEMPTS);
         checks.add(Check.attempts("PopupMenu Escape", attempt));
         boolean sent = escaped;
         boolean returned = !shower.isAlive();
