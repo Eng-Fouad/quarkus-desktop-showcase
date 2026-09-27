@@ -398,9 +398,19 @@ public class PrintJava2dPage implements FeaturePage {
         // printer decides : with no printer, it is the Generic Printer of macOS (PrintCore GenericPrinter.ppd, A4
         // "595.00 842.00", imageable "18.00 41.00 577.00 824.00" : 18 pt margins, 41 pt at the bottom). The 10 mm
         // (28.35 pt) margins stay, the bottom one becomes 41 pt, on a 595x842 paper : landscape 842x595, imageable
-        // x = 842 - 28.35 - 772.65 = 41. PrinterJob.defaultPage() shows the same printer (595x842, 18 / 41 pt margins)
-        if (PrintServiceLookup.lookupPrintServices(null, null).length > 0) {
-            // the margins and the paper sizes of the installed default printer (its PPD)
+        // x = 842 - 28.35 - 772.65 = 41. PrinterJob.defaultPage() shows the same printer (595x842, 18 / 41 pt margins).
+        // AppKit picks its default printer itself : Java sees only the CUPS destinations (lookupDefaultPrintService is
+        // the CUPS default destination, lookupPrintServices all of them, CUPSPrinter.getAllPrinters). The Generic
+        // Printer is certain only when CUPS knows no printer at all ; with any printer, AppKit may use it (its PPD gives
+        // the paper sizes and the margins) : informational, never a false failure
+        boolean printer;
+        try {
+            printer = PrintServiceLookup.lookupDefaultPrintService() != null
+                    || PrintServiceLookup.lookupPrintServices(null, null).length > 0;
+        } catch (Throwable t) {
+            return Check.fail(name, Checks.describe(t));
+        }
+        if (printer) {
             return Checks.info(name, action);
         }
         return Checks.expect(name, "LANDSCAPE 842.00x595.00 imageable 41.00,28.35 772.65x538.31", action);
