@@ -43,6 +43,8 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -314,7 +316,8 @@ public class RobotPage implements FeaturePage {
             } finally {
                 g.dispose();
             }
-            return DesktopSupport.rgb(b.getRGB(SQUARE / 2, SQUARE / 2));
+            // a screen color : within the tolerance of the display color profile on macOS, like the checks above
+            return DesktopSupport.rgb(RobotSession.snap(b.getRGB(SQUARE / 2, SQUARE / 2), COLORS[0]));
         }));
     }
 
@@ -351,10 +354,12 @@ public class RobotPage implements FeaturePage {
         checks.add(Checks.expect("button 1 double click", "pressed b1 x1 Button1, released b1 x1, clicked b1 x1, "
                 + "pressed b1 x2 Button1, released b1 x2, clicked b1 x2", () -> pad.awaitButtons("clicked b1 x2")));
         pad.clear();
+        newClickSequence(session, target);
         click(session, InputEvent.BUTTON2_DOWN_MASK);
         checks.add(Checks.expect("button 2 click", "pressed b2 x1 Button2, released b2 x1, clicked b2 x1",
                 () -> pad.awaitButtons("clicked b2")));
         pad.clear();
+        newClickSequence(session, target);
         click(session, InputEvent.BUTTON3_DOWN_MASK);
         checks.add(Checks.expect("button 3 click", "pressed b3 x1 Button3, released b3 x1, clicked b3 x1",
                 () -> pad.awaitButtons("clicked b3")));
@@ -364,8 +369,9 @@ public class RobotPage implements FeaturePage {
         session.wheel(2);
         session.wheel(-1);
         // Windows sends one event per call, X11 one per notch (wheel buttons) : the sums of both directions
-        checks.add(Checks.expect("mouse wheel: rotations down 2, up 1", "+2 -1", () -> {
-            DesktopSupport.await(() -> pad.wheelSummary().equals("+2 -1"), 2000);
+        String wheel = wheelSummary();
+        checks.add(Checks.expect("mouse wheel: rotations down 2, up 1", wheel, () -> {
+            DesktopSupport.await(() -> pad.wheelSummary().equals(wheel), 2000);
             return pad.wheelSummary();
         }));
         checks.add(Checks.info("mouse wheel: scroll type and amount", () -> pad.wheelType));
@@ -386,6 +392,37 @@ public class RobotPage implements FeaturePage {
                 }));
         checks.add(Checks.expect("mouse drag: last MOUSE_DRAGGED", "160,90", () -> pad.last("dragged")));
         return true;
+    }
+
+    /**
+     * The sums of the rotations of the {@code MouseWheelEvent}s of {@code Robot.mouseWheel(2)} then
+     * {@code mouseWheel(-1)}, down (positive) then up : {@code +2 -1}, inverted on macOS ({@code +1 -2}). There
+     * {@code CRobot.m mouseWheel} posts {@code CGEventCreateScrollWheelEvent(..., kCGScrollEventUnitLine, 1, wheelAmt)},
+     * where a positive delta scrolls up, and {@code CPlatformResponder.dispatchScrollEvent} makes the rotation of the
+     * event the opposite of the delta of the scroll event : {@code mouseWheel(n)} gives a rotation of {@code -n} (one
+     * event per call). The JDK test {@code java/awt/Robot/RobotWheelTest} expects that sign on macOS
+     * ({@code wheelSign = Platform.isOSX() ? -1 : 1}, JDK-8079255), whatever the natural scrolling setting
+     * ({@code com.apple.swipescrolldirection}, given to the WindowServer : {@code CGSSetSwipeScrollDirection}) : it inverts
+     * the scroll events of the devices before the event taps (they carry
+     * {@code NSEvent.isDirectionInvertedFromDevice}), not an event posted at {@code kCGHIDEventTap}. Verified here with
+     * natural scrolling off (a user setting, not changed by the showcase).
+     */
+    private static String wheelSummary() {
+        return Platforms.isMac() ? "+1 -2" : "+2 -1";
+    }
+
+    /**
+     * Makes the next click the first one of a new click sequence (click count 1) on macOS : {@code CRobot.m} gives every
+     * synthetic click one shared click count, whatever the button ({@code gsClickCount}, incremented by a press within
+     * {@code [NSEvent doubleClickInterval]} of the previous press), reset by any mouse movement
+     * ({@code gsLastClickTime = 0}) : a Robot move to the same point. Without it, the button 2 click after the double
+     * click of button 1 has the click count 3, the button 3 click 4. Windows and Linux count the clicks of each button
+     * apart : nothing to do.
+     */
+    private static void newClickSequence(RobotSession session, Point target) {
+        if (Platforms.isMac()) {
+            session.move(target);
+        }
     }
 
     private static int multiClickInterval() {
@@ -433,7 +470,13 @@ public class RobotPage implements FeaturePage {
         }
         DesktopSupport.await(() -> keyLog.size() >= 13, 3000);
         DesktopSupport.sleep(100);
-        checks.add(Checks.expect("key presses (KeyEvent.getKeyText)", "Q U A R K U S Space Shift A W T Backspace",
+        // the key names of the platform (symbols on macOS : Keys). On macOS the letters depend on the keyboard layout :
+        // CRobot presses fixed physical keys (CRobotKeyCodeMapping javaToMacKeyMap : VK_Q is the key of Q on a U.S.
+        // keyboard) and the key code received comes from the character of the layout (CPlatformResponder.handleKeyEvent
+        // gives charsIgnoringModifiers to NSEvent.nsToJavaKeyInfo) : the expected letters are those of a QWERTY layout
+        // (U.S.), e.g. an AZERTY layout gives A for VK_Q
+        checks.add(Checks.expect("key presses (KeyEvent.getKeyText)", "Q U A R K U S " + Keys.text("Space") + " "
+                + Keys.text("Shift") + " A W T " + Keys.text("Backspace"),
                 () -> {
                     synchronized (keyLog) {
                         return String.join(" ", keyLog);

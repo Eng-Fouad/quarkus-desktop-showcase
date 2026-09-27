@@ -49,6 +49,8 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.desktop.DesktopSupport;
@@ -57,8 +59,9 @@ import io.quarkiverse.desktop.showcase.pages.desktop.DesktopSupport;
  * AWT drag and drop : a {@code DragGestureRecognizer} on a lightweight source of tokens, a {@code DragSource} drag with
  * a drag image and a {@code DragSourceListener}/{@code DragSourceMotionListener}, and two {@code DropTarget}s : a
  * lightweight bin (retargeted by the heavyweight ancestor) and a heavyweight {@code java.awt.List}. Two drags are
- * driven by Robot (the operating system drag loop : OLE on Windows, XDnD on Linux) : a move without modifier and a copy
- * with Ctrl, retried when a drag does not end with a drop.
+ * driven by Robot (the operating system drag loop : OLE on Windows, XDnD on Linux, the Cocoa drag session on macOS) : a
+ * move without modifier and a copy with the copy key of the platform ({@link Keys#copyDragKey()} : Ctrl, Option on
+ * macOS), retried when a drag does not end with a drop.
  * <p>
  * AWT only. Needs the focus (Robot input) : the mouse pointer is moved back afterwards, the Robot only presses the
  * mouse button over the page's own components after checking their pixels on screen.
@@ -156,15 +159,39 @@ public class DragAndDropPage implements FeaturePage {
 
         robotView = ChecksView.table("Robot-driven drags", List.of(Check.info("state", "pending")));
         return Ui.column(14,
-                Ui.text("Drag a token from the source to the bin (move) or to the list (copy with Ctrl). The source uses "
-                        + "a DragGestureRecognizer and starts the drag with a drag image ; the bin is a lightweight "
-                        + "drop target, the list a heavyweight one. In snapshot mode, Robot performs both drags.", 1000),
+                Ui.text("Drag a token from the source to the bin (move) or to the list (copy with " + copyKeyText()
+                        + "). The source uses a DragGestureRecognizer and starts the drag with a drag image ; the bin "
+                        + "is a lightweight drop target, the list a heavyweight one. In snapshot mode, Robot performs "
+                        + "both drags.", 1000),
                 Ui.row(24,
                         Ui.column(4, Ui.caption("DragSource (lightweight)"), source),
                         Ui.column(4, Ui.caption("DropTarget : lightweight bin"), bin),
                         Ui.column(4, Ui.caption("DropTarget : java.awt.List (heavyweight)"), list)),
                 ChecksView.table("Drag and drop API", checks),
                 robotView);
+    }
+
+    /**
+     * The name of {@link Keys#copyDragKey()} on this platform : {@code Ctrl} on Windows and Linux, {@code ⌥} (Option) on
+     * macOS.
+     */
+    private static String copyKeyText() {
+        return Keys.text(Keys.copyDragKeyName());
+    }
+
+    /**
+     * The source actions of the {@code DropTargetDropEvent} of a drag of the {@code COPY_OR_MOVE} source, the copy key
+     * of the platform held ({@code copy}) or no modifier. On macOS the drop target reports the source operation mask of
+     * AppKit ({@code CDropTarget.m performDragOperation} : {@code mapNSDragOperationMaskToJava([sender
+     * draggingSourceOperationMask])}), which AppKit limits to the operation of the modifier key held : the mask of the
+     * source ({@code CDragSource draggingSourceOperationMaskForLocal} : {@code mapJavaDragOperationToNS(COPY_OR_MOVE)} =
+     * Copy | Move | Generic) limited to Copy by Option, i.e. {@code COPY} (Control would limit it to Link, which the
+     * source does not offer : {@code NONE}). The drop action itself comes from the modifiers the JDK reads during the
+     * drag ({@code CDropTarget calculateCurrentSourceActions}, {@code DnDUtilities nsDragOperationForModifiers} : Option
+     * is Copy). Windows and Linux report the actions of the source.
+     */
+    private static String dropSourceActions(boolean copy) {
+        return copy && Platforms.isMac() ? "COPY" : "COPY_OR_MOVE";
     }
 
     private static String cursorName(Cursor cursor) {
@@ -212,7 +239,7 @@ public class DragAndDropPage implements FeaturePage {
         // the operating system runs its own loop during a drag : no waitForIdle
         try (RobotSession robot = RobotSession.open().idleAfterInput(false)) {
             done = drag(checks, robot, log, "drag 1 (move to the bin)", 0, false, () -> plan(source, 0, bin, bin))
-                    && drag(checks, robot, log, "drag 2 (copy to the list, Ctrl)", 1, true,
+                    && drag(checks, robot, log, "drag 2 (copy to the list, " + copyKeyText() + ")", 1, true,
                             () -> plan(source, 1, bin, list));
         }
         if (!done) {
@@ -239,9 +266,10 @@ public class DragAndDropPage implements FeaturePage {
     }
 
     /**
-     * Performs one drag (up to 3 attempts). A copy drag holds Ctrl, pressed (and processed) before the mouse button : the
-     * drop target must see the expected drop action before the button is released, otherwise the drag is cancelled with
-     * Escape (nothing is dropped) and done again.
+     * Performs one drag (up to 3 attempts). A copy drag holds the copy key of the platform ({@link Keys#copyDragKey()} :
+     * Ctrl ; Option on macOS, where Control limits the operations of the Cocoa drag to a link), pressed (and processed)
+     * before the mouse button : the drop target must see the expected drop action before the button is released,
+     * otherwise the drag is cancelled with Escape (nothing is dropped) and done again.
      *
      * @return {@code false} when the drag was skipped
      */
@@ -265,7 +293,7 @@ public class DragAndDropPage implements FeaturePage {
                 RobotSession.logRetry("dt-dnd " + name, attempt, "covered : " + robot.lastMismatch());
                 continue;
             }
-            if (copy && !robot.keyPress(KeyEvent.VK_CONTROL)) {
+            if (copy && !robot.keyPress(Keys.copyDragKey())) {
                 outcome = DesktopSupport.NOT_FOCUSED;
                 break;
             }
@@ -286,6 +314,11 @@ public class DragAndDropPage implements FeaturePage {
                 if (log.started) {
                     // cancelled : nothing is dropped
                     robot.nativeKeys(true);
+                    if (Platforms.isMac()) {
+                        // a plain Escape : the copy key (Option) released first, Option+Escape is a shortcut of macOS
+                        // (Speak selection, Accessibility > Spoken Content) ; Windows and Linux cancel with Ctrl held
+                        robot.keyRelease(Keys.copyDragKey());
+                    }
                     robot.key(KeyEvent.VK_ESCAPE);
                     robot.nativeKeys(false);
                 }
@@ -301,7 +334,7 @@ public class DragAndDropPage implements FeaturePage {
             }
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
             // the modifier keys stay pressed until the drop is done : the drag loop reads their state when it handles
-            // the release of the button (Ctrl released too early turned a copy into a move)
+            // the release of the button (the copy key released too early turned a copy into a move)
             robot.finishDrop(plan.to(), () -> log.started, () -> log.ended);
             robot.releaseAll();
             if (log.ended && log.success) {
@@ -326,7 +359,8 @@ public class DragAndDropPage implements FeaturePage {
                     () -> (log.success ? "success " : "failure ") + action(log.dropAction)));
             checks.add(Checks.expect(name + ": data dropped", TOKENS[token], () -> log.data));
             checks.add(Checks.expect(name + ": DropTargetDropEvent",
-                    "action " + (copy ? "COPY" : "MOVE") + ", source actions COPY_OR_MOVE, local transfer true",
+                    "action " + (copy ? "COPY" : "MOVE") + ", source actions " + dropSourceActions(copy)
+                            + ", local transfer true",
                     () -> log.dropEvent));
             checks.add(Checks.expect(name + ": flavors of the drop", "[application/x-java-serialized-object; "
                     + "class=java.lang.String, application/x-showcase-token; class=java.lang.String]",
