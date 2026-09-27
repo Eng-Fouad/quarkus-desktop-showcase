@@ -609,7 +609,7 @@ public class ChoosersPage implements FeaturePage {
         private final File root;
 
         TreeFileSystemView(File root) {
-            this.root = root;
+            this.root = canonical(root);
         }
 
         @Override
@@ -628,7 +628,7 @@ public class ChoosersPage implements FeaturePage {
 
         @Override
         public boolean isRoot(File f) {
-            return root.equals(f);
+            return root.equals(canonical(f));
         }
 
         @Override
@@ -643,7 +643,19 @@ public class ChoosersPage implements FeaturePage {
 
         @Override
         public File getParentDirectory(File dir) {
-            return dir == null || root.equals(dir) ? null : super.getParentDirectory(dir);
+            return dir == null || root.equals(canonical(dir)) ? null : super.getParentDirectory(dir);
+        }
+
+        /**
+         * The canonical form of a file (one name for a directory : Windows also has short 8.3 names), itself when it
+         * cannot be computed.
+         */
+        private static File canonical(File f) {
+            try {
+                return f == null ? null : f.getCanonicalFile();
+            } catch (IOException e) {
+                return f;
+            }
         }
 
         @Override

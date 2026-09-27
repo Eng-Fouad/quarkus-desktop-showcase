@@ -391,7 +391,9 @@ public final class Edt {
     public static synchronized Path tempDir() {
         if (tempDir == null) {
             try {
-                Path dir = Files.createTempDirectory("quarkus-desktop-showcase-");
+                // the real path : java.io.tmpdir may name a directory with a short (8.3) name on Windows
+                // (C:\Users\RUNNER~1\...), which the file choosers show and compare in its long form
+                Path dir = Files.createTempDirectory("quarkus-desktop-showcase-").toRealPath();
                 Runtime.getRuntime().addShutdownHook(new Thread(() -> deleteRecursively(dir), "showcase-temp-cleanup"));
                 tempDir = dir;
             } catch (IOException e) {

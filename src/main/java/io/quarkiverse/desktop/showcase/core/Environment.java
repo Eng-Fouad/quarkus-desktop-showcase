@@ -33,7 +33,9 @@ public final class Environment {
      * Keys that are expected to differ between the JVM and a native executable : reported, never a mismatch.
      */
     public static final List<String> INFO_KEYS = List.of("runtime", "javaVendorVersion", "javaHome", "dpiaware",
-            "uiScale", "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher");
+            "uiScale", "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher",
+            // os.name of a native executable on Windows Server 2025 : see overview-native-limits
+            "os");
 
     private Environment() {
     }

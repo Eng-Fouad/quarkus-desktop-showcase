@@ -52,7 +52,7 @@ public class Compare {
     /** The color tolerance of the Robot pages on macOS (RobotSession.COLOR_TOLERANCE). */
     static final int MAC_CAPTURE_MAX_DELTA = 6;
     static final List<String> ENV_INFO_KEYS = List.of("runtime", "javaVendorVersion", "javaHome", "dpiaware", "uiScale",
-            "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher");
+            "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher", "os");
     static final List<String> NOT_ENV_KEYS = List.of("pages", "uncaughtOutsidePages");
     /** Suffix of the checks counting the attempts of an action on the live desktop (core/Check.attempts). */
     static final String ATTEMPTS = " (attempts)";

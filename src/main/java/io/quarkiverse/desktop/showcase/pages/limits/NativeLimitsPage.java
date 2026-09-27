@@ -108,6 +108,9 @@ public class NativeLimitsPage implements FeaturePage {
         checks.add(Check.info("java.vm.name", property("java.vm.name")));
         checks.add(Check.info("java.vendor.version", property("java.vendor.version")));
         checks.add(Check.info("executable", executable()));
+        // Windows Server 2025 (build 26100 and later) : the JDK names it "Windows Server 2025", GraalVM (its own table of
+        // WindowsSystemPropertiesSupport, which stops at Windows Server 2022) "Windows Server 2022"
+        checks.add(Check.info("os.name", property("os.name")));
         // the java launcher sets sun.java.launcher=SUN_STANDARD, which makes WindowsFlags declare the process DPI aware
         checks.add(Check.info("sun.java.launcher", property("sun.java.launcher")));
         checks.add(Check.info("sun.java2d.dpiaware", property("sun.java2d.dpiaware")));

@@ -171,6 +171,20 @@ if ($Prepare) {
         } while ((Get-Date) -lt $deadline)
         if ($seen) { [ShowcaseDesktop]::Tap(0x1B) }                              # the Start menu they may leave behind
     }
+    Step 'default printer' {
+        # Windows "manages" the default printer : the first process that asks has none, the next ones have one
+        # (overview-environment : default print service none, then present). A default printer from the start. The
+        # showcase never prints to it (it prints to stream print services only).
+        $printers = @(Get-CimInstance Win32_Printer)
+        "printers : $(($printers | ForEach-Object { $_.Name + $(if ($_.Default) { ' (default)' } else { '' }) }) -join ', ')"
+        if ($printers.Count -gt 0 -and -not ($printers | Where-Object Default)) {
+            Set-ItemProperty 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Windows' LegacyDefaultPrinterMode 1
+            $printer = $printers | Where-Object Name -eq 'Microsoft Print to PDF' | Select-Object -First 1
+            if (-not $printer) { $printer = $printers[0] }
+            $result = Invoke-CimMethod -InputObject $printer -MethodName SetDefaultPrinter
+            "default printer $($printer.Name) : $($result.ReturnValue) (0 : done)"
+        }
+    }
     Step 'screen saver' { "screen saver off : $([ShowcaseDesktop]::SetZero(0x0011))" }       # SPI_SETSCREENSAVEACTIVE
     Step 'foreground lock' {
         [ShowcaseDesktop]::Tap(0x10)                                                     # Shift : this process sent the last input
