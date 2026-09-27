@@ -36,6 +36,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -231,7 +232,9 @@ public class NativeLimitsPage implements FeaturePage {
             Locale locale = java.awt.im.InputContext.getInstance().getLocale();
             return locale == null ? "none" : locale.toLanguageTag();
         }));
-        checks.add(Checks.expect("Toolkit.getProperty(AWT.control) (sun.awt.resources.awt bundle)", "Ctrl",
+        // macOS : Toolkit.getProperty reads first the platform resources that LWCToolkit installs, the
+        // sun.awt.resources.awtosx bundle ("⌃", the control key symbol) : Keys.text
+        checks.add(Checks.expect("Toolkit.getProperty(AWT.control) (sun.awt.resources.awt bundle)", Keys.text("Ctrl"),
                 () -> Toolkit.getProperty("AWT.control", "missing bundle")));
         return checks;
     }

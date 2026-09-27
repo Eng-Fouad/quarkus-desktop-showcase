@@ -57,6 +57,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
@@ -444,9 +445,11 @@ public class AwtEventsPage implements FeaturePage {
                 false, MouseEvent.BUTTON1));
         target.dispatchEvent(new MouseEvent(target, MouseEvent.MOUSE_CLICKED, 0, InputEvent.SHIFT_DOWN_MASK, 10, 12, 1,
                 false, MouseEvent.BUTTON1));
+        // the modifier texts are those of the platform (getModifiersExText : "⇧" on macOS, see keyChecks)
         checks.add(Checks.expect("MouseEvents dispatched to a listener",
-                "MOUSE_PRESSED (10,12) button=1 clicks=1 mods=Shift+Button1, MOUSE_RELEASED (10,12) button=1 clicks=1 "
-                        + "mods=Shift, MOUSE_CLICKED (10,12) button=1 clicks=1 mods=Shift",
+                "MOUSE_PRESSED (10,12) button=1 clicks=1 mods=" + Keys.join("Shift", "Button1")
+                        + ", MOUSE_RELEASED (10,12) button=1 clicks=1 mods=" + Keys.text("Shift")
+                        + ", MOUSE_CLICKED (10,12) button=1 clicks=1 mods=" + Keys.text("Shift"),
                 () -> String.join(", ", received)));
 
         LegacyComponent legacy = new LegacyComponent();
@@ -702,6 +705,12 @@ public class AwtEventsPage implements FeaturePage {
         return MouseEvent.getMouseModifiersText(InputEvent.SHIFT_MASK | InputEvent.BUTTON1_MASK);
     }
 
+    /**
+     * The key and modifier texts come from {@code Toolkit.getProperty("AWT.xxx", default)} : the
+     * {@code sun.awt.resources.awt} bundle (Windows, Linux), and on macOS first the {@code sun.awt.resources.awtosx}
+     * bundle that {@code LWCToolkit} installs as the platform resources (the symbols ⌘ ⌃ ⌥ ⇧ ⎋ ⌫ ⇞ ↑ ⌨) :
+     * {@link Keys#text} gives the names of this platform.
+     */
     private static List<Check> keyChecks() {
         List<Check> checks = new ArrayList<>();
         // AWTKeyStroke.getAWTKeyStroke(String) reads the VK_ constants by reflection (KeyEvent.class.getField)
@@ -716,7 +725,9 @@ public class AwtEventsPage implements FeaturePage {
                 () -> AWTKeyStroke.getAWTKeyStroke("ctrl pressed Z") == AWTKeyStroke.getAWTKeyStroke(KeyEvent.VK_Z,
                         InputEvent.CTRL_DOWN_MASK)));
         checks.add(Checks.expect("KeyEvent.getKeyText (F1, NUMPAD5, ESCAPE, BACK_SPACE, PAGE_UP, SEMICOLON, KP_UP)",
-                "F1, NumPad-5, Escape, Backspace, Page Up, Semicolon, Up", () -> String.join(", ", List.of(KeyEvent.VK_F1,
+                String.join(", ", List.of("F1", "NumPad-5", "Escape", "Backspace", "Page Up", "Semicolon", "Up")
+                        .stream().map(Keys::text).toList()),
+                () -> String.join(", ", List.of(KeyEvent.VK_F1,
                         KeyEvent.VK_NUMPAD5, KeyEvent.VK_ESCAPE, KeyEvent.VK_BACK_SPACE, KeyEvent.VK_PAGE_UP,
                         KeyEvent.VK_SEMICOLON, KeyEvent.VK_KP_UP).stream().map(KeyEvent::getKeyText).toList())));
         checks.add(Checks.expect("KeyEvent.getExtendedKeyCodeForChar (a, A, 1, e acute, cyrillic zhe, arabic alef)",
@@ -725,7 +736,7 @@ public class AwtEventsPage implements FeaturePage {
                                 .toUpperCase(Locale.ROOT))
                         .toList())));
         checks.add(Checks.expect("InputEvent.getModifiersExText (all modifiers, buttons)",
-                "Meta+Ctrl+Alt+Shift+Alt Graph / Button1+Button2+Button3",
+                Keys.join("Meta", "Ctrl", "Alt", "Shift", "Alt Graph") + " / Button1+Button2+Button3",
                 () -> InputEvent.getModifiersExText(InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK
                         | InputEvent.SHIFT_DOWN_MASK | InputEvent.ALT_GRAPH_DOWN_MASK | InputEvent.META_DOWN_MASK) + " / "
                         + InputEvent.getModifiersExText(InputEvent.BUTTON1_DOWN_MASK | InputEvent.BUTTON2_DOWN_MASK
@@ -733,8 +744,8 @@ public class AwtEventsPage implements FeaturePage {
         checks.add(Checks.expect("InputEvent.getMaskForButton(1, 2, 3)", "1024 2048 4096",
                 () -> InputEvent.getMaskForButton(1) + " " + InputEvent.getMaskForButton(2) + " "
                         + InputEvent.getMaskForButton(3)));
-        checks.add(Checks.expect("MouseEvent.getMouseModifiersText (old masks SHIFT | BUTTON1)", "Shift+Button1",
-                AwtEventsPage::oldMouseModifiers));
+        checks.add(Checks.expect("MouseEvent.getMouseModifiersText (old masks SHIFT | BUTTON1)",
+                Keys.join("Shift", "Button1"), AwtEventsPage::oldMouseModifiers));
         checks.add(Checks.info("MouseInfo.getNumberOfButtons() / extra mouse buttons enabled",
                 () -> MouseInfo.getNumberOfButtons() + " / " + Toolkit.getDefaultToolkit().areExtraMouseButtonsEnabled()));
         checks.add(Checks.info("input method locale (keyboard layout)", () -> {
@@ -836,7 +847,16 @@ public class AwtEventsPage implements FeaturePage {
                 x11 ? "1 -1 -1" : "1 -2");
     }
 
-    private static final String EXPECTED_KEYS = "A Shift A Space Enter Left Home Ctrl B";
+    /**
+     * The pressed keys of the Robot sequence, named as {@code KeyEvent.getKeyText} names them on this platform (the
+     * symbols of {@code sun.awt.resources.awtosx} on macOS : {@link Keys#text}). Ctrl+B is Ctrl on every platform : it
+     * types the control character U+0002.
+     */
+    private static String expectedKeys() {
+        return String.join(" ", List.of("A", "Shift", "A", "Space", "Enter", "Left", "Home", "Ctrl", "B").stream()
+                .map(Keys::text).toList());
+    }
+
     /** Attempts of the Robot sequence : another application may take the foreground at any time. */
     private static final int ATTEMPTS = 3;
 
@@ -889,7 +909,7 @@ public class AwtEventsPage implements FeaturePage {
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
             checks.add(Checks.expect("wheel rotations", expectedMouse.get(3), () -> results.get(3)));
             if (keys) {
-                checks.add(Checks.expect("pressed keys", EXPECTED_KEYS, () -> results.get(4)));
+                checks.add(Checks.expect("pressed keys", expectedKeys(), () -> results.get(4)));
                 // the characters depend on the keyboard layout (Arabic letters with an Arabic layout)
                 checks.add(Check.info("typed characters (keyboard layout dependent)", String.join(" ", finalLog.stream()
                         .filter(entry -> entry.startsWith("KEY_TYPED"))
@@ -898,7 +918,7 @@ public class AwtEventsPage implements FeaturePage {
                         () -> String.join(" ", finalLog.stream().filter(entry -> entry.startsWith("KEY_TYPED"))
                                 .map(entry -> entry.replaceAll(".*char=('.'|\\S+).*", "$1")).skip(2).toList())));
                 checks.add(Checks.expect("Shift key location", "LEFT", () -> finalLog.stream()
-                        .filter(entry -> entry.startsWith("KEY_PRESSED code=Shift"))
+                        .filter(entry -> entry.startsWith("KEY_PRESSED code=" + Keys.text("Shift")))
                         .map(entry -> entry.replaceAll(".*location=(\\S+).*", "$1")).findFirst().orElse("none")));
             }
         }
@@ -910,7 +930,7 @@ public class AwtEventsPage implements FeaturePage {
      */
     private static boolean complete(List<String> log, boolean keys) {
         List<String> results = results(log, keys);
-        return results.subList(0, 4).equals(expectedMouse()) && (!keys || results.get(4).equals(EXPECTED_KEYS))
+        return results.subList(0, 4).equals(expectedMouse()) && (!keys || results.get(4).equals(expectedKeys()))
                 && log.stream().anyMatch(entry -> entry.contains("popupTrigger"));
     }
 
