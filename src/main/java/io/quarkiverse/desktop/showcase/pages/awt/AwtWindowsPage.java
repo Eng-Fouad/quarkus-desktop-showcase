@@ -475,6 +475,7 @@ public class AwtWindowsPage implements FeaturePage {
                 .thenCompose(v -> state(states, Frame.ICONIFIED, stateLog))
                 .thenCompose(v -> state(states, Frame.NORMAL, stateLog))
                 .thenCompose(v -> state(states, Frame.MAXIMIZED_BOTH, stateLog))
+                .thenCompose(v -> stableBounds(states))
                 .thenCompose(v -> {
                     List<Check> stateChecks = new ArrayList<>();
                     // the frame states need a window manager supporting them (Linux : not under a bare X server)
@@ -566,6 +567,24 @@ public class AwtWindowsPage implements FeaturePage {
         }, 3000, "frame state " + AwtSupport.frameState(state))
                 .handle((v, error) -> null)
                 .thenCompose(v -> Edt.delay(300));
+    }
+
+    /**
+     * Waits (at most 2 s) until the bounds of {@code window} did not change for 300 ms : on X11 the window manager
+     * configures a maximized frame, then its frame extents, in several steps after the state change.
+     */
+    private static CompletionStage<Void> stableBounds(Window window) {
+        Rectangle[] last = { window.getBounds() };
+        long[] since = { System.nanoTime() };
+        return Edt.until(() -> {
+            Rectangle bounds = window.getBounds();
+            if (!bounds.equals(last[0])) {
+                last[0] = bounds;
+                since[0] = System.nanoTime();
+                return false;
+            }
+            return System.nanoTime() - since[0] > 300_000_000L;
+        }, 2000, "stable bounds").handle((v, error) -> null);
     }
 
     private static Rectangle cell(Rectangle area, int index) {
