@@ -187,9 +187,11 @@ public class ShapesPage implements FeaturePage {
   showcase holds a machine-wide lock, after its window was brought to the front.
 - **Safety** (the showcase runs on real desktops): never print to a real printer (only `StreamPrintService` PostScript
   into memory or files), close print and page dialogs programmatically, never call `Desktop.browse/open/mail/print/edit`
-  or `TrayIcon.displayMessage` unless `-Dshowcase.sideEffects=true`, send Robot key presses only while one of the
-  showcase windows is focused (`Edt.ownsFocus()`, otherwise record `skipped: not focused`), restore the mouse position
-  after Robot moves, save and restore the user's clipboard text, no fullscreen or display mode change unless
+  or `TrayIcon.displayMessage` unless allowed (`-Dshowcase.sideEffects=true` allows every side effect, a comma
+  separated list only these: `browse`, `tray-balloon`, `attention`, `taskbar`, `dock`; for instance
+  `-Dshowcase.sideEffects=tray-balloon` shows one notification), send Robot key presses only while one of the showcase
+  windows is focused (`Edt.ownsFocus()`, otherwise record `skipped: not focused`), restore the mouse position after
+  Robot moves, save and restore the user's clipboard text, no fullscreen or display mode change unless
   `-Dshowcase.fullscreen=true`, and dispose every window a page opens.
 
 ## Pages

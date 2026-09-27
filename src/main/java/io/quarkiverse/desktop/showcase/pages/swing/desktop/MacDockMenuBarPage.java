@@ -104,7 +104,7 @@ public class MacDockMenuBarPage implements FeaturePage {
             return icon == null ? "null" : icon.getWidth(null) + "x" + icon.getHeight(null);
         }));
         dock.add(Checks.info("getMenu()", () -> taskbar.getMenu() == null ? "null" : "a menu"));
-        if (DesktopSupport.sideEffects()) {
+        if (DesktopSupport.sideEffect(DesktopSupport.DOCK)) {
             Image previousIcon = taskbar.getIconImage();
             PopupMenu previousMenu = taskbar.getMenu();
             restore.add(() -> taskbar.setIconBadge(null));
@@ -172,7 +172,7 @@ public class MacDockMenuBarPage implements FeaturePage {
                 && awtBar.getMenuCount() == 1));
         menus.add(Checks.expect("Desktop APP_MENU_BAR supported", true,
                 () -> Desktop.getDesktop().isSupported(Desktop.Action.APP_MENU_BAR)));
-        if (DesktopSupport.sideEffects()) {
+        if (DesktopSupport.sideEffect(DesktopSupport.DOCK)) {
             JMenuBar defaultBar = new JMenuBar();
             defaultBar.add(new JMenu("Default"));
             restore.add(() -> Desktop.getDesktop().setDefaultMenuBar(null));

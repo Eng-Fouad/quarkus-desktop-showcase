@@ -136,7 +136,7 @@ public class MacAppEventsPage implements FeaturePage {
             desktop.disableSuddenTermination();
             return "done";
         }));
-        if (DesktopSupport.sideEffects()) {
+        if (DesktopSupport.sideEffect(DesktopSupport.DOCK)) {
             installed.add(Checks.run("requestForeground(true)", () -> {
                 desktop.requestForeground(true);
                 return "requested";

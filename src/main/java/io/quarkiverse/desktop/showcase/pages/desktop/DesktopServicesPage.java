@@ -282,7 +282,7 @@ public class DesktopServicesPage implements FeaturePage {
         }));
 
         // actions with visible effects : only on request
-        if (DesktopSupport.sideEffects()) {
+        if (DesktopSupport.sideEffect(DesktopSupport.BROWSE)) {
             checks.add(Checks.run("browse(https://quarkus.io/)", () -> {
                 desktop.browse(URI.create("https://quarkus.io/"));
                 return "called";
@@ -392,7 +392,7 @@ public class DesktopServicesPage implements FeaturePage {
                         taskbar.requestWindowUserAttention(window);
                         return "requested";
                     }));
-        } else if (DesktopSupport.sideEffects()) {
+        } else if (DesktopSupport.sideEffect(DesktopSupport.ATTENTION)) {
             checks.add(Checks.run("requestWindowUserAttention", () -> {
                 taskbar.requestWindowUserAttention(window);
                 return "requested";
@@ -430,7 +430,7 @@ public class DesktopServicesPage implements FeaturePage {
         };
         if (!taskbar.isSupported(feature)) {
             checks.add(DesktopSupport.expectThrows(name, UnsupportedOperationException.class, call));
-        } else if (DesktopSupport.sideEffects()) {
+        } else if (DesktopSupport.sideEffect(DesktopSupport.TASKBAR)) {
             checks.add(Checks.run(name, call));
         } else {
             checks.add(Check.info(name, "supported, not called (-Dshowcase.sideEffects=true)"));
@@ -484,7 +484,7 @@ public class DesktopServicesPage implements FeaturePage {
                 icon.setImage(trayImage());
                 return "updated";
             }));
-            if (DesktopSupport.sideEffects()) {
+            if (DesktopSupport.sideEffect(DesktopSupport.TRAY_BALLOON)) {
                 checks.add(Checks.run("TrayIcon.displayMessage", () -> {
                     icon.displayMessage("Quarkus Desktop Showcase", "A balloon message", TrayIcon.MessageType.INFO);
                     return "displayed";

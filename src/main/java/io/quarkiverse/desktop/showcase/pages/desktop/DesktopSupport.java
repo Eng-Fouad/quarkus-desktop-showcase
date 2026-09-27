@@ -37,15 +37,43 @@ public final class DesktopSupport {
     /** Value of the checks whose Robot keyboard input was not sent because no showcase window was focused. */
     public static final String NOT_FOCUSED = "skipped: not focused";
 
+    /** Side effect : {@code Desktop.browse} and {@code Desktop.mail} (opens the browser and the mail client). */
+    public static final String BROWSE = "browse";
+    /** Side effect : {@code TrayIcon.displayMessage} (a notification of the desktop). */
+    public static final String TRAY_BALLOON = "tray-balloon";
+    /** Side effect : {@code Taskbar.requestWindowUserAttention} (flashes the taskbar button). */
+    public static final String ATTENTION = "attention";
+    /** Side effect : the application features of {@code Taskbar} (badge, progress, attention of the dock icon). */
+    public static final String TASKBAR = "taskbar";
+    /** Side effect : macOS Dock icon, badge and menu, default menu bar, {@code Desktop.requestForeground}. */
+    public static final String DOCK = "dock";
+
     private DesktopSupport() {
     }
 
     /**
-     * {@code true} when side effects outside the showcase windows are allowed ({@code -Dshowcase.sideEffects=true}) :
-     * Desktop browse/open/mail/edit, tray balloons, taskbar attention requests.
+     * {@code true} when every side effect outside the showcase windows is allowed ({@code -Dshowcase.sideEffects=true}) :
+     * Desktop browse/mail, tray balloons, taskbar attention requests, dock changes.
      */
     public static boolean sideEffects() {
-        return Boolean.getBoolean("showcase.sideEffects");
+        return "true".equalsIgnoreCase(System.getProperty("showcase.sideEffects", "").trim());
+    }
+
+    /**
+     * {@code true} when the side effect {@code name} ({@link #BROWSE}, {@link #TRAY_BALLOON}, {@link #ATTENTION},
+     * {@link #TASKBAR}, {@link #DOCK}) is allowed : {@code -Dshowcase.sideEffects=true} allows all of them, a comma
+     * separated list of names only these (e.g. {@code -Dshowcase.sideEffects=tray-balloon} for one notification).
+     */
+    public static boolean sideEffect(String name) {
+        if (sideEffects()) {
+            return true;
+        }
+        for (String allowed : System.getProperty("showcase.sideEffects", "").split(",")) {
+            if (allowed.trim().equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
