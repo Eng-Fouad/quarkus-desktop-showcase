@@ -224,19 +224,30 @@ and feel as system icons (`swing-choosers`).
 
 ## Continuous integration
 
-`.github/workflows/cycle.yml` runs the cycles of the Linux image on GitHub Actions against a quarkus-desktop commit (it
-is installed in the Maven repository of the container first): the default and awt-only variants with the tracing agent,
-and both with `--exact`, on `ubuntu-24.04-arm` (other runners through the `runners` input, e.g.
-`["ubuntu-24.04-arm", "ubuntu-24.04"]`). Each cycle runs with `--require-focus`. `Cycle.java` exits 1 when a run fails,
-when `--exact` finds accesses missing from the metadata, or when the runs do not match: the job fails, the summary of
-the run shows the verdict, what differs and the MetadataDiff headings, the same details are annotations of the job, and
-the logs, reports and metadata are artifacts (with the images of both runs when the job failed).
+`.github/workflows/cycle.yml` runs the cycles on GitHub Actions against a quarkus-desktop commit (installed first), on
+five platforms. A plan job builds the matrices from one table of variants: every push and pull request runs the variants
+below, and every night adds more exact-metadata and awt-only variants.
 
-- `.github/workflows/showcase.yml` (this repository): on every push and pull request, every night (the builder image
-  and quarkus-desktop change without the showcase), and manually (`workflow_dispatch`: another quarkus-desktop commit,
-  other runners, and two experiments that never fail the run: a Windows cycle on `windows-2025`, whose screen is small
-  and whose Direct3D is off, and two JVM runs on `macos-15`, macOS native executables needing the Quarkus pull request
-  56979).
+| Platform | Runner | What runs |
+|---|---|---|
+| Linux-arm64 | `ubuntu-24.04-arm` | the Linux image (Xvfb 3840x2160, openbox, a system tray) : default and awt-only with the tracing agent, both with `--exact` |
+| Linux-x64 | `ubuntu-24.04` | the Linux image : default and awt-only (nightly : both with `--exact`) |
+| Windows-x64 | `windows-2025` | Oracle GraalVM for JDK 25 on the runner desktop, at its largest display mode (GDI : Direct3D is off on Windows Server) : default with the tracing agent, awt-only (nightly : `--exact`) |
+| Windows-arm64 | `windows-11-arm` | no native-image for Windows on arm64 : two JVM runs compared (`Cycle.java --jvm-only`, Microsoft Build of OpenJDK 25) |
+| macOS-arm64 | `macos-26` | GraalVM CE 25.4 and the Quarkus 999-SNAPSHOT of the pull request 56979 (built once per head commit of the pull request on Linux, cached) : default with the tracing agent (nightly : awt-only, `--exact`) |
+
+Each cycle runs with `--require-focus`, and on Windows and macOS with `-Dshowcase.activate=true` (the application
+activates itself, see "Focus" in "Writing a page"). `Cycle.java` exits 1 when a run fails, when `--exact` finds accesses
+missing from the metadata, or when the runs do not match. `.github/scripts/cycle-report.sh` writes the verdict, what
+differs, the screen, the pipeline and the macOS privacy permissions of the runs to the summary of the run and as an
+annotation of the job; the logs, reports and metadata are artifacts (with the images of both runs when the job failed).
+`.github/scripts/windows-desktop.ps1` and `macos-desktop.sh` prepare and describe the runner desktops (display mode,
+first-run windows, screenshots before and after the cycle). The platforms that never ran on GitHub are non-blocking
+(`blocking` in the plan table) until they are reliably green.
+
+- `.github/workflows/showcase.yml` (this repository): on every push and pull request, every night (the builder image,
+  the runner images and quarkus-desktop change without the showcase), and manually (another quarkus-desktop commit,
+  some of the platforms, the nightly variants).
 - `.github/workflows/showcase.yml` of quarkus-desktop calls the same workflow on every push to its main branch, on its
   pull requests labelled `showcase`, and manually.
 
@@ -286,12 +297,14 @@ public class ShapesPage implements FeaturePage {
     FocusOut then FocusIn (the application briefly has no focused window), Windows has no foreground window during an
     activation change;
   - `Focus.acquire(window)` brings a window to the front and waits until it really has the focus (at most 4 attempts);
-    on Windows the later attempts click the middle of the title bar of a decorated showcase window, as a user would,
-    only where `WindowFromPoint` says the window under the point belongs to the showcase, and move the pointer back. On
-    Linux and macOS `core.Foreground` knows nothing (the Java focus state is trusted) and each attempt is `toFront` and
-    `requestFocus` only: X11 activates windows through the window manager (`_NET_ACTIVE_WINDOW`; the Docker window
-    manager has no mouse bindings, a click would activate nothing), and on macOS `Desktop.requestForeground` is the
-    opt-in `dock` side effect;
+    on Windows the later attempts click the title bar of a decorated showcase window (its middle first), as a user
+    would, only where `WindowFromPoint` says the window under the point belongs to the showcase, and move the pointer
+    back. On Linux and macOS `core.Foreground` knows nothing (the Java focus state is trusted) and each attempt is
+    `toFront` and `requestFocus` only: X11 activates windows through the window manager (`_NET_ACTIVE_WINDOW`; the
+    Docker window manager has no mouse bindings, a click would activate nothing), and macOS only focuses the windows of
+    the active application, which AWT never activates. With `-Dshowcase.activate=true` (unattended runs only, such as
+    CI: on a user's desktop it takes the focus from the active application), each attempt first activates the
+    application on macOS (`Desktop.requestForeground`), and the later attempts click the title bar there too;
   - `RobotSession` (from a background thread) sends keys and mouse buttons only when `Edt.ownsFocus()` (waiting up to
     500 ms with `Edt.awaitFocus`), waits for each key press and release to be dispatched before the next input (a
     modifier pressed too early or released too late changes the result), restores the pointer and releases everything
