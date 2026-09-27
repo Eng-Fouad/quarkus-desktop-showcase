@@ -837,7 +837,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
         } finally {
             robot.keyRelease(KeyEvent.VK_SHIFT);
         }
-        robot.waitForIdle();
+        RobotSession.waitForIdle(robot);
         boolean complete = u.robotPressed.size() == ROBOT_KEYS.length + 3;
         return new Typing(true, complete, complete ? "" : focusReason(u, u.robotPressed.size()));
     }

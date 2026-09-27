@@ -58,6 +58,11 @@ import org.jboss.logging.Logger;
  */
 public final class RobotSession implements AutoCloseable {
 
+    /**
+     * See {@link #waitForIdle(Robot)}.
+     */
+    private static final Object IDLE_LOCK = new Object();
+
     private static final Logger LOG = Logger.getLogger(RobotSession.class);
 
     /** The longest wait for the event of a key press or release. */
@@ -523,7 +528,20 @@ public final class RobotSession implements AutoCloseable {
     // ----------------------------------------------------------------------------------------------------- misc
 
     public void idle() {
-        robot.waitForIdle();
+        waitForIdle(robot);
+    }
+
+    /**
+     * {@link Robot#waitForIdle()}, one thread at a time in the whole application. On macOS it is not thread safe:
+     * {@code LWCToolkit.nativeSyncQueue} posts a dummy event and waits on one {@code NSConditionLock} of the application,
+     * which each call allocates and releases: two threads waiting at the same time release it under each other, and the
+     * process crashes (EXC_BAD_ACCESS in {@code -[NSConditionLock lockWhenCondition:beforeDate:]}, seen in a native
+     * snapshot run when a background thread of awt-menus was still running on awt-events). Off the EDT only.
+     */
+    public static void waitForIdle(Robot robot) {
+        synchronized (IDLE_LOCK) {
+            robot.waitForIdle();
+        }
     }
 
     public void delay(int millis) {

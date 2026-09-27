@@ -15,6 +15,9 @@
         <quarkus.platform.version>3.40.0</quarkus.platform.version>
         <quarkus-desktop.version>999-SNAPSHOT</quarkus-desktop.version>
         <compiler-plugin.version>3.14.0</compiler-plugin.version>
+        <!-- core/Foreground : native access for the Foreign Function and Memory API (see application.properties). Here and
+             not in application.properties, which would override the value of the mac profile -->
+        <quarkus.native.additional-build-args-append>--enable-native-access=ALL-UNNAMED</quarkus.native.additional-build-args-append>
     </properties>
 
     <dependencyManagement>

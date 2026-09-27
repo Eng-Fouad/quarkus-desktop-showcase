@@ -40,6 +40,11 @@ public class SnapshotRunner {
 
     private static final Logger LOG = Logger.getLogger(SnapshotRunner.class);
 
+    /**
+     * How long the background threads of a page may still run after it : then interrupted, and waited for as long again.
+     */
+    private static final long BACKGROUND_GRACE_MILLIS = 5_000;
+
     @ConfigProperty(name = "showcase.snapshot.dir")
     Optional<String> dir;
 
@@ -104,7 +109,8 @@ public class SnapshotRunner {
                 .thenRunAsync(() -> writeImage(Snapshots.render(window.rootContent(), scale), out.resolve("_main-window.png")),
                         Edt.EDT);
         for (FeaturePage page : pages) {
-            chain = chain.thenComposeAsync(v -> capture(window, page, out), Edt.EDT).thenAccept(result -> {
+            chain = chain.thenCompose(v -> awaitBackground())
+                    .thenComposeAsync(v -> capture(window, page, out), Edt.EDT).thenAccept(result -> {
                 results.add(result);
                 // written after every page too : a run that crashes (e.g. a native executable) still has a report
                 writeReport(out, results, false);
@@ -332,5 +338,17 @@ public class SnapshotRunner {
         } catch (IOException e) {
             LOG.error("Failed to write report", e);
         }
+    }
+
+    /**
+     * Waits for the background threads of the previous page (see {@link Edt#awaitBackground}) : a page never starts
+     * while a driver thread of the previous one still runs.
+     */
+    private static CompletionStage<Void> awaitBackground() {
+        return Edt.awaitBackground(BACKGROUND_GRACE_MILLIS).thenAccept(left -> {
+            if (!left.isEmpty()) {
+                LOG.warnf("Background threads of the previous page still running : %s", left);
+            }
+        });
     }
 }

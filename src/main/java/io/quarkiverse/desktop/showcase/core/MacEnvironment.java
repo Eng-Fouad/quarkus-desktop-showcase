@@ -137,7 +137,7 @@ public final class MacEnvironment {
             }
         });
         try {
-            robot.waitForIdle();
+            RobotSession.waitForIdle(robot);
             long deadline = System.nanoTime() + 1_500_000_000L;
             while (true) {
                 boolean shown = true;
@@ -184,7 +184,7 @@ public final class MacEnvironment {
         try {
             for (int attempt = 0; attempt < 3; attempt++) {
                 robot.mouseMove(start.x + dx, start.y + dy);
-                robot.waitForIdle();
+                RobotSession.waitForIdle(robot);
                 robot.delay(100);
                 PointerInfo moved = MouseInfo.getPointerInfo();
                 if (moved != null && moved.getLocation().equals(new Point(start.x + dx, start.y + dy))) {

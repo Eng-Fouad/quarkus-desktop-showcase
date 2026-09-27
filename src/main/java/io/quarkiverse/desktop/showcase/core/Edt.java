@@ -13,12 +13,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -48,6 +52,11 @@ public final class Edt {
 
     // created at run time (never in a static initializer : Quarkus initializes this class at build time)
     private static ScheduledExecutorService scheduler;
+
+    /**
+     * The running threads of {@link #background}.
+     */
+    private static final Set<Thread> BACKGROUND = ConcurrentHashMap.newKeySet();
     private static Path tempDir;
 
     private Edt() {
@@ -212,11 +221,64 @@ public final class Edt {
                 EventQueue.invokeLater(() -> done.complete(value));
             } catch (Throwable t) {
                 EventQueue.invokeLater(() -> done.completeExceptionally(t));
+            } finally {
+                BACKGROUND.remove(Thread.currentThread());
             }
         }, "showcase-background");
         thread.setDaemon(true);
+        BACKGROUND.add(thread);
         thread.start();
         return done;
+    }
+
+    /**
+     * Completes on the EDT once the threads of {@link #background} started so far have ended, with the names of those
+     * still running, if any (without blocking the EDT : the threads may be waiting for it). A thread still running after
+     * {@code graceMillis} is interrupted (the waits of the pages and of {@link RobotSession} end on an interrupt), and
+     * the wait gives up after the same time again.
+     * <p>
+     * The snapshot runner waits for them between two pages : a page that gave up (a ready timeout) must not leave a
+     * driver thread sending Robot input to the next page, and on macOS two threads in {@code Robot.waitForIdle()} at the
+     * same time crash the JDK (see {@link RobotSession#waitForIdle(Robot)}).
+     */
+    public static CompletionStage<List<String>> awaitBackground(long graceMillis) {
+        List<Thread> threads = List.copyOf(BACKGROUND);
+        if (threads.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        CompletableFuture<List<String>> done = new CompletableFuture<>();
+        Thread joiner = new Thread(() -> {
+            List<String> left = new ArrayList<>();
+            try {
+                if (!join(threads, graceMillis)) {
+                    threads.forEach(Thread::interrupt);
+                    join(threads, graceMillis);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            for (Thread thread : threads) {
+                if (thread.isAlive()) {
+                    String stack = Arrays.toString(thread.getStackTrace());
+                    left.add(thread.getName() + " " + stack.substring(0, Math.min(stack.length(), 300)));
+                }
+            }
+            EventQueue.invokeLater(() -> done.complete(left));
+        }, "showcase-background-join");
+        joiner.setDaemon(true);
+        joiner.start();
+        return done;
+    }
+
+    private static boolean join(List<Thread> threads, long millis) throws InterruptedException {
+        long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
+        for (Thread thread : threads) {
+            long left = TimeUnit.NANOSECONDS.toMillis(end - System.nanoTime());
+            if (left > 0) {
+                thread.join(left);
+            }
+        }
+        return threads.stream().noneMatch(Thread::isAlive);
     }
 
     /**
