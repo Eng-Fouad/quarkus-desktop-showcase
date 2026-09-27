@@ -3,6 +3,7 @@ package io.quarkiverse.desktop.showcase.pages.awt;
 import java.awt.AWTEvent;
 import java.awt.AWTKeyStroke;
 import java.awt.ActiveEvent;
+import java.awt.BorderLayout;
 import java.awt.Canvas;
 import java.awt.Color;
 import java.awt.Component;
@@ -37,6 +38,7 @@ import java.awt.image.BufferedImage;
 import java.awt.im.InputContext;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,6 +60,7 @@ import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Keys;
+import io.quarkiverse.desktop.showcase.core.MacPreferences;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
@@ -161,7 +164,12 @@ public class AwtEventsPage implements FeaturePage {
 
         private void record(AWTEvent e) {
             if (recording) {
-                log.add(AwtSupport.describe(e));
+                String entry = AwtSupport.describe(e);
+                synchronized (log) {
+                    if (!repeatedMove(e, entry, log.isEmpty() ? null : log.get(log.size() - 1))) {
+                        log.add(entry);
+                    }
+                }
             }
         }
 
@@ -395,9 +403,15 @@ public class AwtEventsPage implements FeaturePage {
         target.setName("targetCanvas");
         target.setPreferredSize(new Dimension(CANVAS_WIDTH, CANVAS_HEIGHT));
         List<String> global = Collections.synchronizedList(new ArrayList<>());
+        // the description of the last event of the target seen by the listener (on the EDT only)
+        String[] lastGlobal = new String[1];
         globalListener = e -> {
             if (e.getSource() == target && target.recording) {
-                global.add(AwtSupport.idName(e));
+                String entry = AwtSupport.describe(e);
+                if (!repeatedMove(e, entry, lastGlobal[0])) {
+                    global.add(AwtSupport.idName(e));
+                }
+                lastGlobal[0] = entry;
             }
         };
         Toolkit.getDefaultToolkit().addAWTEventListener(globalListener, AWTEvent.MOUSE_EVENT_MASK
@@ -768,7 +782,10 @@ public class AwtEventsPage implements FeaturePage {
         // the Robot target : an always-on-top frame of its own (the windows of other applications never cover it)
         targetFrame = new java.awt.Frame("Robot target");
         targetFrame.setAlwaysOnTop(true);
-        targetFrame.add(target);
+        targetFrame.add(target, BorderLayout.CENTER);
+        if (Platforms.isMac()) {
+            targetFrame.add(enterStrip(), BorderLayout.NORTH);
+        }
         targetFrame.pack();
         java.awt.Rectangle area = AwtSupport.secondaryArea(targetFrame.getWidth(), targetFrame.getHeight());
         targetFrame.setLocation(area.x, area.y);
@@ -792,11 +809,19 @@ public class AwtEventsPage implements FeaturePage {
                     }
                     Point origin = target.getLocationOnScreen();
                     boolean capsLock = capsLock();
+                    Boolean naturalScrolling = MacPreferences.naturalScrolling();
                     return Edt.background(() -> drive(target, global, origin, !capsLock)).thenApply(result -> {
                         List<Check> checks = new ArrayList<>(result);
                         checks.add(0, Check.attempts("target frame focused", focused));
                         checks.add(0, Check.info("keyboard input", capsLock ? "skipped: caps lock is on" : "sent"));
                         checks.add(1, Check.info("keyboard layout (input method locale)", AwtSupport.inputLocale()));
+                        if (Platforms.isMac()) {
+                            // the direction of the Robot wheel events on macOS (see expectedMouse)
+                            checks.add(2, Check.info(
+                                    "scroll direction (macOS preference com.apple.swipescrolldirection)",
+                                    naturalScrolling == null ? "unknown"
+                                            : naturalScrolling ? "natural" : "not natural"));
+                        }
                         List<String> log = new ArrayList<>(target.log);
                         checks.add(Checks.expect("AWTEventListener saw the same events as the canvas listeners", true,
                                 () -> counts(log).equals(countNames(global))));
@@ -839,8 +864,21 @@ public class AwtEventsPage implements FeaturePage {
      * (XWindow.handleMotionNotify) : the release after the drag has none. Windows sends one wheel event per Robot call,
      * X11 one per notch (a press and release of the wheel buttons). Computed at run time (Quarkus initializes this
      * class at build time).
+     * <p>
+     * macOS : {@code CRobot} counts the clicks itself (native {@code GetClickCount} of {@code CRobot.m}, whatever the
+     * button) : a mouse move resets the time of the last click, and a release longer than the double click interval
+     * after it has the click count 0 : as on X11, the release after the drag has none. One wheel event per Robot call,
+     * in the direction of the scroll preference of macOS ({@link MacPreferences#naturalScrolling()} : {@code n}
+     * notches give a rotation of {@code n} with natural scrolling, {@code -n} without) ; {@code null} (no expectation)
+     * when that preference is unknown.
      */
     private static List<String> expectedMouse() {
+        if (Platforms.isMac()) {
+            Boolean natural = MacPreferences.naturalScrolling();
+            return Arrays.asList("MOUSE_ENTERED (40,40)", "1 2 1",
+                    "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1",
+                    natural == null ? null : natural ? "1 -2" : "-1 2");
+        }
         boolean x11 = Platforms.isLinux();
         return List.of("MOUSE_ENTERED (40,40)", "1 2 1",
                 "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1" + (x11 ? "" : " clicks=1"),
@@ -857,6 +895,74 @@ public class AwtEventsPage implements FeaturePage {
                 .map(Keys::text).toList());
     }
 
+    /** Height of the strip above the canvas in the target frame (macOS, see {@link #rest}). */
+    private static final int STRIP_HEIGHT = 24;
+
+    /**
+     * The strip of the target frame above the canvas, on macOS (see {@link #rest}) : a part of the content view of the
+     * window that is not the canvas.
+     */
+    private static Component enterStrip() {
+        java.awt.Panel strip = new java.awt.Panel();
+        strip.setName("enterStrip");
+        strip.setPreferredSize(new Dimension(CANVAS_WIDTH, STRIP_HEIGHT));
+        return strip;
+    }
+
+    /**
+     * Where the pointer starts and ends the Robot sequence : outside the canvas, still in the target frame. Windows and
+     * Linux : 4 px above the canvas, in the frame insets (the title bar). macOS sends the content view of the window no
+     * mouse event while the pointer is over the title bar, not even the exit (seen on macOS 27 : no MOUSE_EXITED, no
+     * MOUSE_MOVED) : {@code LWWindowPeer}, which makes the MOUSE_ENTERED and MOUSE_EXITED of the components from the
+     * mouse events of the window ({@code generateMouseEnterExitEventsForComponents}), would still have the canvas
+     * under the pointer, and post no MOUSE_ENTERED when the pointer comes back. There the pointer rests in the strip
+     * above the canvas ({@link #enterStrip()}, part of the content view) : the move from the strip into the canvas
+     * posts the MOUSE_EXITED of the strip and the MOUSE_ENTERED of the canvas. 20 px above the canvas : the arrow of
+     * the pointer, drawn down from its tip, stays out of the canvas and of its capture.
+     */
+    private static Point rest(Point origin) {
+        return new Point(origin.x + CANVAS_WIDTH / 2, origin.y - (Platforms.isMac() ? STRIP_HEIGHT - 4 : 4));
+    }
+
+    /**
+     * The point whose screen pixel proves, right before a click at {@code click}, that the canvas is there (not covered
+     * by another window) : the click point itself, except on macOS, where the screen pixels that Robot reads include
+     * the mouse pointer ({@code CRobot.getRGBPixel} reads them with the native {@code nativeGetScreenPixels}, a
+     * {@code CGWindowListCreateImage} of the screen : seen on macOS 27, the pixel under the pointer is the arrow's),
+     * and the pointer is on the click point : 10 px up and left of it, outside the arrow drawn down and right from its
+     * tip.
+     */
+    private static Point probe(Point click) {
+        return Platforms.isMac() ? new Point(click.x - 10, click.y - 10) : click;
+    }
+
+    /**
+     * {@code true} on macOS for a MOUSE_MOVED whose description {@code entry} is the one of the event recorded just
+     * before ({@code previous}) : there each pointer move of Robot comes twice to the window (seen on macOS 27 : two
+     * MOUSE_MOVED at the same point for each {@code Robot.mouseMove} ; AppKit calls {@code mouseMoved:} of the content
+     * view {@code AWTView} both as the first responder of a window that accepts mouse moved events and as the owner of
+     * a tracking area with {@code NSTrackingMouseMoved}), and the event queue merges the second into the first only
+     * while the first is still queued ({@code EventQueue.coalesceMouseEvent}) : one or two events depending on the
+     * timing (they differed between a JVM and a native run). The log and the counts keep one. Windows and Linux :
+     * never.
+     */
+    private static boolean repeatedMove(AWTEvent e, String entry, String previous) {
+        return Platforms.isMac() && e.getID() == MouseEvent.MOUSE_MOVED && entry.equals(previous);
+    }
+
+    /**
+     * {@code true} when {@code results} (the mouse results, then the keys) has the {@code expected} ones
+     * ({@code null} : any value).
+     */
+    private static boolean matches(List<String> results, List<String> expected) {
+        for (int i = 0; i < expected.size(); i++) {
+            if (expected.get(i) != null && !expected.get(i).equals(results.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Attempts of the Robot sequence : another application may take the foreground at any time. */
     private static final int ATTEMPTS = 3;
 
@@ -868,6 +974,10 @@ public class AwtEventsPage implements FeaturePage {
     private List<Check> drive(RecordingCanvas target, List<String> global, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
         try (RobotSession robot = RobotSession.open()) {
+            if (Platforms.isMac()) {
+                // the screen pixels include the pointer there (see probe) : away from the pixels probed below
+                robot.move(rest(origin));
+            }
             // the new frame is painted (a slower first paint shows the background of the native window until then)
             robot.delay(300);
             robot.idle();
@@ -907,7 +1017,9 @@ public class AwtEventsPage implements FeaturePage {
                     io.quarkiverse.desktop.showcase.core.Platforms.isWindows() ? "MOUSE_RELEASED" : "MOUSE_PRESSED",
                     () -> finalLog.stream().filter(entry -> entry.contains("popupTrigger"))
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
-            checks.add(Checks.expect("wheel rotations", expectedMouse.get(3), () -> results.get(3)));
+            checks.add(expectedMouse.get(3) == null
+                    ? Check.info("wheel rotations", results.get(3) + " (scroll direction of macOS unknown)")
+                    : Checks.expect("wheel rotations", expectedMouse.get(3), () -> results.get(3)));
             if (keys) {
                 checks.add(Checks.expect("pressed keys", expectedKeys(), () -> results.get(4)));
                 // the characters depend on the keyboard layout (Arabic letters with an Arabic layout)
@@ -930,7 +1042,7 @@ public class AwtEventsPage implements FeaturePage {
      */
     private static boolean complete(List<String> log, boolean keys) {
         List<String> results = results(log, keys);
-        return results.subList(0, 4).equals(expectedMouse()) && (!keys || results.get(4).equals(expectedKeys()))
+        return matches(results, expectedMouse()) && (!keys || results.get(4).equals(expectedKeys()))
                 && log.stream().anyMatch(entry -> entry.contains("popupTrigger"));
     }
 
@@ -958,8 +1070,9 @@ public class AwtEventsPage implements FeaturePage {
      * One run of the Robot sequence : mouse moves, clicks, a drag, the right button, the wheel and keys.
      */
     private void sequence(RobotSession robot, RecordingCanvas target, Point origin, boolean keys) {
-        // start outside the canvas (in the frame insets, still our window), then record
-        robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
+        // start outside the canvas (in the frame insets, still our window ; in a strip of the frame on macOS), then
+        // record
+        robot.move(rest(origin));
         robot.delay(100);
         target.log.clear();
         target.recording = true;
@@ -967,14 +1080,14 @@ public class AwtEventsPage implements FeaturePage {
         robot.move(new Point(origin.x + 40, origin.y + 40));
         robot.move(new Point(origin.x + 60, origin.y + 50));
         Point click = new Point(origin.x + 60, origin.y + 50);
-        if (robot.pixelIs(click, CANVAS_COLOR)) {
+        if (robot.pixelIs(probe(click), CANVAS_COLOR)) {
             robot.press(InputEvent.BUTTON1_DOWN_MASK);
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
             robot.press(InputEvent.BUTTON1_DOWN_MASK);
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
         }
         robot.delay(600);
-        if (robot.pixelIs(click, CANVAS_COLOR)) {
+        if (robot.pixelIs(probe(click), CANVAS_COLOR)) {
             robot.press(InputEvent.BUTTON1_DOWN_MASK);
             robot.move(new Point(origin.x + 100, origin.y + 70));
             robot.move(new Point(origin.x + 140, origin.y + 90));
@@ -982,11 +1095,11 @@ public class AwtEventsPage implements FeaturePage {
         }
         robot.delay(600);
         Point right = new Point(origin.x + 140, origin.y + 90);
-        if (robot.pixelIs(right, CANVAS_COLOR)) {
+        if (robot.pixelIs(probe(right), CANVAS_COLOR)) {
             robot.press(InputEvent.BUTTON3_DOWN_MASK);
             robot.release(InputEvent.BUTTON3_DOWN_MASK);
         }
-        if (robot.pixelIs(right, CANVAS_COLOR)) {
+        if (robot.pixelIs(probe(right), CANVAS_COLOR)) {
             robot.wheel(1);
             robot.wheel(-2);
         }
@@ -999,7 +1112,7 @@ public class AwtEventsPage implements FeaturePage {
             robot.key(KeyEvent.VK_HOME);
             robot.key(KeyEvent.VK_CONTROL, KeyEvent.VK_B);
         }
-        robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
+        robot.move(rest(origin));
         robot.delay(200);
         robot.idle();
         // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
