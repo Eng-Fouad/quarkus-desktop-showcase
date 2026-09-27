@@ -435,12 +435,16 @@ public class AwtMenusPage implements FeaturePage {
                     // macOS : the MenuBar of a Frame is the screen menu bar, outside the window
                     // (LWWindowPeer.setMenuBar hands it to CPlatformWindow.setMenuBar, the menu bar of the application
                     // while the frame is active), and the insets are those of the NSWindow alone
-                    // (CPlatformWindow.getInsets : nativeGetNSWindowInsets, the title bar) : the same with and without
-                    // the menu bar
-                    checks.add(Checks.expect("Frame insets : the menu bar adds to the top inset",
-                            Platforms.isMac() ? "false, same left/right" : "true, same left/right",
-                            () -> (with.top > without.top) + ", " + (with.left == without.left && with.right == without.right
-                                    ? "same left/right" : "different left/right")));
+                    // (CPlatformWindow.getInsets : nativeGetNSWindowInsets, the title bar) : the same insets with and
+                    // without the menu bar
+                    checks.add(Platforms.isMac()
+                            ? Checks.expect("Frame insets : the menu bar adds to the top inset", "false, same insets",
+                                    () -> (with.top > without.top) + ", " + (with.equals(without) ? "same insets"
+                                            : "different insets " + with + " / " + without))
+                            : Checks.expect("Frame insets : the menu bar adds to the top inset", "true, same left/right",
+                                    () -> (with.top > without.top) + ", "
+                                            + (with.left == without.left && with.right == without.right
+                                                    ? "same left/right" : "different left/right")));
                     if (!ShowcaseMode.snapshot() || !ShowcaseMode.realInput()) {
                         checks.add(Check.info("native menus with the keyboard", "skipped: snapshot mode only"));
                         return CompletableFuture.completedFuture(null);
