@@ -76,6 +76,8 @@ public final class Environment {
             // the keyboard layout changes the rendering (Windows lays native controls and menus out right to left for
             // an Arabic or Hebrew layout) and the characters Robot types : runs are comparable with the same one only
             env.put("inputLocale", inputLocale());
+            // the foreground check of Edt.ownsFocus (Windows, Foreign Function and Memory API) : the same in both runs
+            env.put("foregroundCheck", Foreground.available() ? "GetForegroundWindow" : "none");
         }
         env.put("fontFamilies", Platforms.installedFamilies().size());
         env.put("lookAndFeel", "none");

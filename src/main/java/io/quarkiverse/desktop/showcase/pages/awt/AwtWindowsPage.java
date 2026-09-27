@@ -48,7 +48,9 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -508,13 +510,15 @@ public class AwtWindowsPage implements FeaturePage {
                     statesView.setChecks(stateChecks);
                     // the main window gets the focus back : the title bars of the gallery are inactive in the capture
                     if (previouslyFocused != null && previouslyFocused.isShowing()) {
-                        previouslyFocused.toFront();
-                        previouslyFocused.requestFocus();
+                        return Focus.acquire(previouslyFocused).thenCompose(attempts -> {
+                            checks.add(Check.attempts("page window focused again", attempts));
+                            return Edt.delay(1200);
+                        });
                     }
                     return Edt.delay(1200);
                 })
                 .thenCompose(v -> Edt.background(() -> {
-                    try (RobotSupport robot = RobotSupport.create()) {
+                    try (RobotSession robot = RobotSession.open()) {
                         robot.idle();
                         return robot.capture(area);
                     }

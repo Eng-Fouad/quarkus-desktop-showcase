@@ -49,6 +49,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.desktop.DesktopSupport;
 
@@ -208,7 +209,8 @@ public class DragAndDropPage implements FeaturePage {
             throws Exception {
         List<Check> checks = new ArrayList<>();
         boolean done;
-        try (DesktopSupport.RobotSession robot = new DesktopSupport.RobotSession()) {
+        // the operating system runs its own loop during a drag : no waitForIdle
+        try (RobotSession robot = RobotSession.open().idleAfterInput(false)) {
             done = drag(checks, robot, log, "drag 1 (move to the bin)", 0, false, () -> plan(source, 0, bin, bin))
                     && drag(checks, robot, log, "drag 2 (copy to the list, Ctrl)", 1, true,
                             () -> plan(source, 1, bin, list));
@@ -237,14 +239,19 @@ public class DragAndDropPage implements FeaturePage {
     }
 
     /**
-     * Performs one drag (up to 3 attempts).
+     * Performs one drag (up to 3 attempts). A copy drag holds Ctrl, pressed (and processed) before the mouse button : the
+     * drop target must see the expected drop action before the button is released, otherwise the drag is cancelled with
+     * Escape (nothing is dropped) and done again.
      *
      * @return {@code false} when the drag was skipped
      */
-    private static boolean drag(List<Check> checks, DesktopSupport.RobotSession robot, DragLog log, String name,
+    private static boolean drag(List<Check> checks, RobotSession robot, DragLog log, String name,
             int token, boolean copy, java.util.concurrent.Callable<DragPlan> planner) throws Exception {
         String outcome = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
+        int expectedAction = copy ? DnDConstants.ACTION_COPY : DnDConstants.ACTION_MOVE;
+        int attempt = 0;
+        while (attempt < 3) {
+            attempt++;
             log.reset();
             DragPlan plan = DesktopSupport.onEdt(planner);
             robot.move(plan.from());
@@ -271,10 +278,22 @@ public class DragAndDropPage implements FeaturePage {
             robot.glide(plan.from(), start, 8, 20);
             robot.glide(start, plan.to(), 24, 15);
             DesktopSupport.sleep(200);
+            outcome = null;
+            if (log.started && !DesktopSupport.await(() -> log.overAction == expectedAction, 1500)) {
+                // the drop would use another action (the modifier keys reached the drag loop late) : cancelled
+                robot.nativeKeys(true);
+                robot.key(KeyEvent.VK_ESCAPE);
+                robot.nativeKeys(false);
+                robot.release(InputEvent.BUTTON1_DOWN_MASK);
+                robot.releaseAll();
+                DesktopSupport.await(() -> log.ended, 4000);
+                outcome = "skipped: the drop action stayed " + action(log.overAction);
+                DesktopSupport.sleep(300);
+                continue;
+            }
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
             robot.releaseAll();
             DesktopSupport.await(() -> log.ended, 4000);
-            outcome = null;
             if (log.ended && log.success) {
                 break;
             }
@@ -292,6 +311,7 @@ public class DragAndDropPage implements FeaturePage {
             }
             DesktopSupport.sleep(300);
         }
+        checks.add(Check.attempts(name, attempt));
         if (outcome != null) {
             checks.add(Check.info(name, outcome));
             return false;
@@ -342,6 +362,8 @@ public class DragAndDropPage implements FeaturePage {
         volatile boolean ended;
         volatile boolean success;
         volatile boolean motion;
+        /** The drop action of the last drag event of a drop target. */
+        volatile int overAction;
         int dropAction;
         String data;
         String dropEvent;
@@ -354,6 +376,7 @@ public class DragAndDropPage implements FeaturePage {
             started = false;
             ended = false;
             success = false;
+            overAction = 0;
             dropAction = 0;
             data = null;
             dropEvent = null;
@@ -376,6 +399,7 @@ public class DragAndDropPage implements FeaturePage {
         @Override
         public void dragEnter(DropTargetDragEvent e) {
             log.targetEvents.add(name + " dragEnter");
+            log.overAction = e.getDropAction();
             if (e.isDataFlavorSupported(tokenFlavor())) {
                 e.acceptDrag(e.getDropAction());
             } else {
@@ -386,11 +410,13 @@ public class DragAndDropPage implements FeaturePage {
         @Override
         public void dragOver(DropTargetDragEvent e) {
             log.targetEvents.add(name + " dragOver");
+            log.overAction = e.getDropAction();
         }
 
         @Override
         public void dropActionChanged(DropTargetDragEvent e) {
             log.targetEvents.add(name + " dropActionChanged");
+            log.overAction = e.getDropAction();
         }
 
         @Override

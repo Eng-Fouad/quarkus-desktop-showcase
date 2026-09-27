@@ -45,6 +45,7 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -218,8 +219,11 @@ public class AwtMixingPage implements FeaturePage {
         JComponent disc = s.discs.get(1);
         Point onWindow = SwingUtilities.convertPoint(disc, 0, 0, SwingUtilities.getWindowAncestor(disc));
         disc.setMixingCutoutShape(new Ellipse2D.Float(onWindow.x, onWindow.y, 100, 100));
-        return Edt.until(Edt::ownsFocus, 2_000, "focus")
-                .handle((v, error) -> Edt.ownsFocus())
+        return Focus.acquire(SwingUtilities.getWindowAncestor(s.area))
+                .thenApply(attempts -> {
+                    checks.add(Check.attempts("window focused", attempts));
+                    return attempts > 0;
+                })
                 .thenCompose(focused -> {
                     if (!focused) {
                         checks.add(Check.info("screen checks", "skipped: not focused"));
@@ -316,24 +320,7 @@ public class AwtMixingPage implements FeaturePage {
         // popup show their colors (slow with -Xint, while the window comes to the front, or for a heavy weight popup
         // window). Another application (or showcase process) may still cover the window : bring it to the front once
         // more and wait again.
-        return Edt.background(() -> painted(gc, reference, canvas, popup, 4_000))
-                .thenCompose(painted -> {
-                    if (painted) {
-                        return CompletableFuture.completedFuture(true);
-                    }
-                    window.toFront();
-                    return Edt.background(() -> painted(gc, reference, canvas, popup, 5_000));
-                })
-                .thenCompose(painted -> Edt.background(() -> {
-                    Robot robot = new Robot(gc.getDevice());
-                    Thread.sleep(300);
-                    Map<String, Integer> colors = new LinkedHashMap<>();
-                    for (Map.Entry<String, Point> e : points.entrySet()) {
-                        colors.put(e.getKey(), robot.getPixelColor(e.getValue().x, e.getValue().y).getRGB() & 0xFFFFFF);
-                    }
-                    BufferedImage capture = robot.createScreenCapture(area);
-                    return Map.entry(colors, capture);
-                }))
+        return sample(gc, reference, canvas, popup, points, area, window, checks, 1)
                 .thenAccept(result -> {
                     // the window may have lost the focus meanwhile, or be covered by another window : the pixels are
                     // then those of another window
@@ -359,6 +346,46 @@ public class AwtMixingPage implements FeaturePage {
                     checks.add(Check.fail("robot", Checks.describe(error)));
                     s.screen = placeholder();
                     return null;
+                });
+    }
+
+    /** Attempts of the screen sampling. */
+    private static final int ATTEMPTS = 3;
+
+    /**
+     * Waits until the window is painted on screen, then reads the pixels of {@code points} and captures {@code area}
+     * with Robot : again (at most {@link #ATTEMPTS} times, the window focused again first) when the window lost the
+     * focus or is covered meanwhile.
+     */
+    private static CompletionStage<Map.Entry<Map<String, Integer>, BufferedImage>> sample(GraphicsConfiguration gc,
+            Point reference, Point canvas, Point popup, Map<String, Point> points, Rectangle area, java.awt.Window window,
+            List<Check> checks, int attempt) {
+        return Edt.background(() -> painted(gc, reference, canvas, popup, 4_000))
+                .thenCompose(painted -> {
+                    if (painted) {
+                        return CompletableFuture.completedFuture(true);
+                    }
+                    window.toFront();
+                    return Edt.background(() -> painted(gc, reference, canvas, popup, 5_000));
+                })
+                .thenCompose(painted -> Edt.background(() -> {
+                    Robot robot = new Robot(gc.getDevice());
+                    Thread.sleep(300);
+                    Map<String, Integer> colors = new LinkedHashMap<>();
+                    for (Map.Entry<String, Point> e : points.entrySet()) {
+                        colors.put(e.getKey(), robot.getPixelColor(e.getValue().x, e.getValue().y).getRGB() & 0xFFFFFF);
+                    }
+                    BufferedImage capture = robot.createScreenCapture(area);
+                    return Map.entry(colors, capture);
+                }))
+                .thenCompose(result -> {
+                    boolean lost = !Edt.ownsFocus() || result.getKey().get("reference") != REFERENCE_TEAL;
+                    if (lost && attempt < ATTEMPTS) {
+                        return Focus.acquire(window).thenCompose(a -> sample(gc, reference, canvas, popup, points, area,
+                                window, checks, attempt + 1));
+                    }
+                    checks.add(Check.attempts("screen pixels", attempt));
+                    return CompletableFuture.completedFuture(result);
                 });
     }
 

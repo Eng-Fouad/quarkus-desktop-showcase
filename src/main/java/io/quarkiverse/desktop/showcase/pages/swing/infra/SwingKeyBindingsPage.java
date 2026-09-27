@@ -81,6 +81,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -645,11 +646,18 @@ public class SwingKeyBindingsPage implements FeaturePage {
     // ------------------------------------------------------------------------------------------------ focus, Robot
 
     private CompletionStage<Void> focusPhase(Demo u, List<Check> checks) {
-        if (!Edt.ownsFocus()) {
-            checks.add(Check.info("alt M : label mnemonic moves the focus to its labelFor", "skipped: not focused"));
-            checks.add(Check.info("Robot typing", "skipped: not focused"));
-            return CompletableFuture.completedFuture(null);
-        }
+        // the page window focused, this process owning the foreground
+        return Focus.acquire(SwingUtilities.getWindowAncestor(u.nameField)).thenCompose(attempts -> {
+            if (attempts == 0) {
+                checks.add(Check.info("alt M : label mnemonic moves the focus to its labelFor", "skipped: not focused"));
+                checks.add(Check.info("Robot typing", "skipped: not focused"));
+                return CompletableFuture.completedFuture(null);
+            }
+            return focusedPhase(u, checks);
+        });
+    }
+
+    private CompletionStage<Void> focusedPhase(Demo u, List<Check> checks) {
         // label mnemonic : pressed alt M (window binding) focuses the label, released alt M (on the label) focuses the
         // labelFor component
         press(u.nameField, KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK);
@@ -719,6 +727,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                                 : Check.info(name, "skipped: not focused"));
                         return null;
                     }
+                    checks.add(Check.attempts(name, outcome.attempts()));
                     // informational : whether the keyboard input reached the page depends on the desktop, but the
                     // value is compared between the runs
                     checks.add(Check.info("Robot canary (a lone Shift) reached the Robot field",
@@ -751,7 +760,47 @@ public class SwingKeyBindingsPage implements FeaturePage {
     }
 
     /** The outcome of the Robot typing. */
-    private record Typing(boolean canary, boolean complete, String reason) {
+    private record Typing(boolean canary, boolean complete, String reason, int attempts) {
+
+        Typing(boolean canary, boolean complete, String reason) {
+            this(canary, complete, reason, 1);
+        }
+
+        Typing attempts(int count) {
+            return new Typing(canary, complete, reason, count);
+        }
+    }
+
+    /** Attempts of the Robot typing : another application may take the foreground at any time. */
+    private static final int ATTEMPTS = 3;
+
+    /**
+     * {@link #typeOnce}, again while the typing is incomplete (at most {@link #ATTEMPTS} times) : the window is focused
+     * again ({@link Focus#acquireBlocking}) and the Robot field emptied first.
+     */
+    private static Typing type(Demo u) throws Exception {
+        Typing outcome = typeOnce(u);
+        int attempt = 1;
+        while (!outcome.complete() && attempt < ATTEMPTS) {
+            attempt++;
+            JTextField field = u.robotField;
+            java.awt.Window window = onEdt(() -> SwingUtilities.getWindowAncestor(field));
+            if (Focus.acquireBlocking(window) == 0) {
+                break;
+            }
+            onEdt(() -> {
+                u.robotPressed.clear();
+                u.robotTyped.setLength(0);
+                field.setText("");
+                return field.requestFocusInWindow();
+            });
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            while (!u.robotFieldFocused.get() && System.nanoTime() - deadline < 0) {
+                Thread.sleep(20);
+            }
+            outcome = typeOnce(u);
+        }
+        return outcome.attempts(attempt);
     }
 
     /**
@@ -762,7 +811,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
      * and only once the previous key press has reached the Robot field : at most one key could go elsewhere if the
      * foreground changes during the sequence, and none when it was not ours at the start (the canary).
      */
-    private static Typing type(Demo u) throws Exception {
+    private static Typing typeOnce(Demo u) throws Exception {
         Robot robot = new Robot();
         robot.setAutoDelay(0);
         if (!send(robot, u, KeyEvent.VK_SHIFT)) {
@@ -788,6 +837,17 @@ public class SwingKeyBindingsPage implements FeaturePage {
         robot.waitForIdle();
         boolean complete = u.robotPressed.size() == ROBOT_KEYS.length + 3;
         return new Typing(true, complete, complete ? "" : focusReason(u, u.robotPressed.size()));
+    }
+
+    private static <T> T onEdt(java.util.concurrent.Callable<T> action) throws Exception {
+        try {
+            return Edt.supply(action).toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            if (e.getCause() instanceof Exception ex) {
+                throw ex;
+            }
+            throw e;
+        }
     }
 
     private static boolean sendable(Demo u) {

@@ -3,6 +3,7 @@ package io.quarkiverse.desktop.showcase.core;
 import java.awt.AWTEvent;
 import java.awt.EventQueue;
 import java.awt.Toolkit;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 
 /**
@@ -15,7 +16,17 @@ import java.awt.event.MouseEvent;
  */
 final class InputFilter extends EventQueue {
 
+    private static volatile boolean installed;
+
     private InputFilter() {
+    }
+
+    /**
+     * {@code true} once the filter is installed (snapshot mode) : it also reports the dispatched key events to
+     * {@link RobotSession}.
+     */
+    static boolean installed() {
+        return installed;
     }
 
     /**
@@ -26,6 +37,7 @@ final class InputFilter extends EventQueue {
         if (!(queue instanceof InputFilter)) {
             queue.push(new InputFilter());
         }
+        installed = true;
     }
 
     @Override
@@ -34,5 +46,9 @@ final class InputFilter extends EventQueue {
             return;
         }
         super.dispatchEvent(event);
+        if (event instanceof KeyEvent) {
+            // after the dispatch : the key was processed (Robot typing waits for it)
+            RobotSession.dispatched(event);
+        }
     }
 }

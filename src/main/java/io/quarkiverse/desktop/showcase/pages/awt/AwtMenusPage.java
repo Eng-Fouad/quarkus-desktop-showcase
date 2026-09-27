@@ -47,6 +47,8 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -464,7 +466,7 @@ public class AwtMenusPage implements FeaturePage {
 
     /**
      * The native menus driven with the keyboard (F10 opens the menu bar, arrows move, Enter activates, Escape closes)
-     * and captured with Robot, then the popup menu : only once the menu frame is focused.
+     * and captured with Robot, then the popup menu : only once the menu frame is focused ({@link Focus#acquire}).
      */
     private CompletionStage<Void> nativeMenus(MenuFrame m, List<Check> checks) {
         java.awt.Window previouslyFocused = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
@@ -477,13 +479,11 @@ public class AwtMenusPage implements FeaturePage {
         backdrop.setVisible(true);
         frame.setAlwaysOnTop(true);
         frame.setAutoRequestFocus(true);
-        frame.toFront();
-        frame.requestFocus();
         m.canvas.requestFocusInWindow();
-        return Edt.until(frame::isFocused, 3000, "menu frame focused")
-                .handle((v, error) -> error == null)
-                .thenCompose(focused -> {
-                    if (!focused) {
+        return Focus.acquire(frame)
+                .thenCompose(attempts -> {
+                    checks.add(Check.attempts("menu frame focused", attempts));
+                    if (attempts == 0) {
                         checks.add(Check.info("native menus with the keyboard", "skipped: not focused"));
                         return CompletableFuture.completedFuture(null);
                     }
@@ -510,8 +510,12 @@ public class AwtMenusPage implements FeaturePage {
     private record DriveResult(List<Check> checks, Map<String, BufferedImage> images) {
     }
 
+    /** Attempts of each keyboard sequence : another application may take the foreground at any time. */
+    private static final int ATTEMPTS = 3;
+
     /**
-     * Runs on a background thread (Robot).
+     * Runs on a background thread (Robot). Each keyboard sequence is retried (at most {@link #ATTEMPTS} times, the menu
+     * frame focused again first) when its effect is missing : a sequence changes no state unless it had its effect.
      */
     private static DriveResult drive(MenuFrame m, Rectangle frame, Point canvas, Dimension size) throws Exception {
         List<Check> checks = new ArrayList<>();
@@ -522,20 +526,36 @@ public class AwtMenusPage implements FeaturePage {
         int next = rtl ? KeyEvent.VK_LEFT : KeyEvent.VK_RIGHT;
         checks.add(Check.info("keyboard layout (menu bar direction on Windows)", AwtSupport.inputLocale()
                 + (rtl ? ", right to left" : ", left to right")));
-        try (RobotSupport robot = RobotSupport.create()) {
+        // the native menu loops consume the keys : Java sees no key event while a menu is open
+        try (RobotSession robot = RobotSession.open().nativeKeys(true)) {
             // the pointer away from the menus (a stationary pointer under a new menu highlights an item)
             robot.move(new Point(canvas.x + size.width - 8, canvas.y + size.height - 8));
             robot.delay(300);
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
 
-            boolean opened = robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN);
-            robot.delay(600);
-            if (opened) {
-                BufferedImage file = robot.capture(frame);
-                images.put("file-menu", file);
+            // F10, Down : the File menu opens (the capture differs from the closed frame)
+            BufferedImage file = null;
+            int attempt = 0;
+            while (file == null && attempt < ATTEMPTS && focused(robot, m)) {
+                attempt++;
+                if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN)) {
+                    robot.delay(600);
+                    BufferedImage captured = robot.capture(frame);
+                    if (!Checks.sha256(captured).equals(Checks.sha256(closed))) {
+                        file = captured;
+                    }
+                }
+                if (file == null) {
+                    closeMenus(robot);
+                }
+            }
+            checks.add(Check.attempts("F10, Down", attempt));
+            if (file != null) {
+                BufferedImage opened = file;
+                images.put("file-menu", opened);
                 checks.add(Checks.expect("F10, Down : the File menu opens (capture differs)", true,
-                        () -> !Checks.sha256(file).equals(Checks.sha256(closed))));
+                        () -> !Checks.sha256(opened).equals(Checks.sha256(closed))));
                 if (robot.key(next) && robot.key(next)) {
                     robot.delay(600);
                     images.put("view-menu", robot.capture(frame));
@@ -543,23 +563,44 @@ public class AwtMenusPage implements FeaturePage {
             } else {
                 checks.add(Check.info("F10, Down : the File menu opens", "skipped: not focused"));
             }
-            robot.key(KeyEvent.VK_ESCAPE);
-            robot.key(KeyEvent.VK_ESCAPE);
-            robot.delay(300);
+            closeMenus(robot);
 
             // activation from the native menu : the peer calls back into Java (handleAction)
             m.events.clear();
-            if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN) && robot.key(KeyEvent.VK_ENTER)) {
-                waitFor(robot, () -> !m.events.isEmpty());
+            attempt = 0;
+            boolean activated = false;
+            while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
+                attempt++;
+                if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN) && robot.key(KeyEvent.VK_ENTER)) {
+                    activated = waitFor(robot, () -> !m.events.isEmpty());
+                }
+                if (!activated) {
+                    closeMenus(robot);
+                }
+            }
+            checks.add(Check.attempts("F10, Down, Enter", attempt));
+            if (activated) {
                 checks.add(Checks.expect("F10, Down, Enter : native activation of File > New", "action New",
                         () -> String.join(", ", m.events)));
             } else {
                 checks.add(Check.info("F10, Down, Enter : native activation of File > New", "skipped: not focused"));
             }
             m.events.clear();
-            if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next) && robot.key(KeyEvent.VK_DOWN)
-                    && robot.key(KeyEvent.VK_ENTER)) {
-                waitFor(robot, () -> !m.events.isEmpty());
+            attempt = 0;
+            activated = false;
+            while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
+                attempt++;
+                if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next) && robot.key(KeyEvent.VK_DOWN)
+                        && robot.key(KeyEvent.VK_ENTER)) {
+                    // the item toggles once : never sent again once its event arrived
+                    activated = waitFor(robot, () -> !m.events.isEmpty());
+                }
+                if (!activated) {
+                    closeMenus(robot);
+                }
+            }
+            checks.add(Check.attempts("F10, Right, Right, Down, Enter", attempt));
+            if (activated) {
                 checks.add(Checks.expect("native activation of View > Toolbar (CheckboxMenuItem)",
                         "item Toolbar DESELECTED, state false", () -> String.join(", ", m.events) + ", state "
                                 + m.toolbar.getState()));
@@ -578,12 +619,29 @@ public class AwtMenusPage implements FeaturePage {
     }
 
     /**
-     * {@code PopupMenu.show} : on Windows the peer tracks the menu synchronously (the calling thread waits until the menu
-     * is closed), so it is shown from a helper thread and closed with Escape.
+     * {@code true} once the menu frame is focused and this process owns the foreground (asked again if needed).
      */
-    private static void popup(MenuFrame m, RobotSupport robot, Point canvas, Dimension size, List<Check> checks,
-            Map<String, BufferedImage> images) throws InterruptedException {
-        if (!io.quarkiverse.desktop.showcase.core.Edt.ownsFocus()) {
+    private static boolean focused(RobotSession robot, MenuFrame m) throws Exception {
+        return robot.ensureFocus(m.frame);
+    }
+
+    /**
+     * Escape twice : closes an open menu, then leaves the menu bar.
+     */
+    private static void closeMenus(RobotSession robot) {
+        robot.key(KeyEvent.VK_ESCAPE);
+        robot.key(KeyEvent.VK_ESCAPE);
+        robot.delay(300);
+    }
+
+    /**
+     * {@code PopupMenu.show} : on Windows the peer tracks the menu synchronously (the calling thread waits until the menu
+     * is closed), so it is shown from a helper thread and closed with Escape (sent again while the menu stays open, at
+     * most {@link #ATTEMPTS} times).
+     */
+    private static void popup(MenuFrame m, RobotSession robot, Point canvas, Dimension size, List<Check> checks,
+            Map<String, BufferedImage> images) throws Exception {
+        if (!focused(robot, m)) {
             checks.add(Check.info("PopupMenu.show, Escape", "skipped: not focused"));
             return;
         }
@@ -593,18 +651,31 @@ public class AwtMenusPage implements FeaturePage {
         robot.delay(700);
         images.put("popup-menu", robot.capture(new Rectangle(canvas.x, canvas.y, Math.min(size.width, 360),
                 Math.min(size.height, 300))));
-        boolean escaped = robot.key(KeyEvent.VK_ESCAPE);
-        shower.join(TimeUnit.SECONDS.toMillis(3));
+        boolean escaped = false;
+        int attempt = 0;
+        while (shower.isAlive() && attempt < ATTEMPTS) {
+            attempt++;
+            if (robot.key(KeyEvent.VK_ESCAPE)) {
+                escaped = true;
+            }
+            shower.join(TimeUnit.SECONDS.toMillis(attempt == ATTEMPTS ? 3 : 1));
+        }
+        checks.add(Check.attempts("PopupMenu Escape", attempt));
+        boolean sent = escaped;
         boolean returned = !shower.isAlive();
         checks.add(Checks.expect("PopupMenu.show(canvas, 30, 30), then Escape", "closed",
-                () -> !escaped ? "skipped: not focused" : returned ? "closed" : "still open"));
+                () -> !sent ? "skipped: not focused" : returned ? "closed" : "still open"));
     }
 
-    private static void waitFor(RobotSupport robot, java.util.function.BooleanSupplier condition) {
+    /**
+     * Waits (2 s at most) until {@code condition} is true.
+     */
+    private static boolean waitFor(RobotSession robot, java.util.function.BooleanSupplier condition) {
         for (int i = 0; i < 100 && !condition.getAsBoolean(); i++) {
             robot.delay(20);
             robot.idle();
         }
+        return condition.getAsBoolean();
     }
 
     @Override

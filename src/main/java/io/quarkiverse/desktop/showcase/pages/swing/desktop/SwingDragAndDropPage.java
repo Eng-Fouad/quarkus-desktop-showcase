@@ -49,6 +49,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.pages.desktop.DesktopSupport;
 
 /**
@@ -333,7 +334,8 @@ public class SwingDragAndDropPage implements FeaturePage {
             throws Exception {
         List<Check> checks = new ArrayList<>();
         boolean done;
-        try (DesktopSupport.RobotSession robot = new DesktopSupport.RobotSession()) {
+        // the operating system runs its own loop during a drag : no waitForIdle
+        try (RobotSession robot = RobotSession.open().idleAfterInput(false)) {
             done = drag(checks, robot, log, "drag 1 (list item to the text area)", "text area",
                     plan(panel, cell(list, 1), below(area)))
                     && drag(checks, robot, log, "drag 2 (list item onto a tree node)", "tree",
@@ -414,10 +416,12 @@ public class SwingDragAndDropPage implements FeaturePage {
         };
     }
 
-    private static boolean drag(List<Check> checks, DesktopSupport.RobotSession robot, DropLog log, String name,
+    private static boolean drag(List<Check> checks, RobotSession robot, DropLog log, String name,
             String expectedTarget, Callable<Plan> planner) throws Exception {
         String outcome = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
+        int attempt = 0;
+        while (attempt < 3) {
+            attempt++;
             log.reset();
             Plan plan = DesktopSupport.onEdt(planner);
             robot.move(plan.from());
@@ -448,6 +452,7 @@ public class SwingDragAndDropPage implements FeaturePage {
             }
             DesktopSupport.sleep(300);
         }
+        checks.add(Check.attempts(name, attempt));
         if (outcome != null) {
             checks.add(Check.info(name, outcome));
             return false;

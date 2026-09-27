@@ -14,6 +14,13 @@
     { "type": "java.awt.Component", "fields": [ { "name": "peer" } ] },
     { "type": "sun.lwawt.LWComponentPeer", "methods": [ { "name": "getDelegate", "parameterTypes": [] } ] }
   ],
+  "foreign": {
+    "downcalls": [
+      { "returnType": "jlong", "parameterTypes": [] },
+      { "returnType": "jlong", "parameterTypes": [ "jlong" ] },
+      { "returnType": "jint", "parameterTypes": [ "jlong", "void*" ] }
+    ]
+  },
   "resources": [
     { "glob": "META-INF/services/javax.imageio.spi.ImageReaderSpi" },
     { "glob": "META-INF/services/javax.imageio.spi.ImageWriterSpi" },

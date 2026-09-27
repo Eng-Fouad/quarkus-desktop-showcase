@@ -37,6 +37,9 @@ import javax.imageio.ImageIO;
  * The images and check values of a page flagged {@code runtimeDependent} in the reports (a page showing where the JVM
  * and a native image legitimately differ) are reported as EXPECTED when they differ : they are not mismatches, but
  * failed checks and errors of such a page still are.
+ * <p>
+ * The checks named {@code <action> (attempts)} count the attempts that an action on the live desktop needed (focus,
+ * Robot input) : their differences are reported as {@code attempts:} notes, not as mismatches.
  */
 public class Compare {
 
@@ -45,6 +48,8 @@ public class Compare {
     static final List<String> ENV_INFO_KEYS = List.of("runtime", "javaVendorVersion", "javaHome", "dpiaware", "uiScale",
             "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher");
     static final List<String> NOT_ENV_KEYS = List.of("pages", "uncaughtOutsidePages");
+    /** Suffix of the checks counting the attempts of an action on the live desktop (core/Check.attempts). */
+    static final String ATTEMPTS = " (attempts)";
 
     record ImageResult(String file, String status, long differing, long total, int maxDelta, String diffFile) {
     }
@@ -140,7 +145,10 @@ public class Compare {
                 checkNames.addAll(cb.keySet());
                 for (String c : checkNames) {
                     if (!String.valueOf(ca.get(c)).equals(String.valueOf(cb.get(c)))) {
-                        if (runtimeDependent.contains(id)) {
+                        if (c.endsWith(ATTEMPTS) && ca.containsKey(c) && cb.containsKey(c)) {
+                            // how many attempts an action on the live desktop needed : not a difference of the runtimes
+                            notes.add("attempts: check '" + c + "': A=" + ca.get(c) + " | B=" + cb.get(c));
+                        } else if (runtimeDependent.contains(id)) {
                             notes.add("expected: check '" + c + "': A=" + ca.get(c) + " | B=" + cb.get(c));
                             expectedPages.add(id);
                         } else {
@@ -170,7 +178,7 @@ public class Compare {
                     sameErrorPages++;
                 }
                 if (notes.stream().anyMatch(n -> !n.startsWith("error") && !n.startsWith("same error")
-                        && !n.startsWith("expected"))) {
+                        && !n.startsWith("expected") && !n.startsWith("attempts"))) {
                     mismatches++;
                 }
                 pageNotes.put(id, notes);

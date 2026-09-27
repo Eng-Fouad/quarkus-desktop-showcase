@@ -17,6 +17,7 @@ import java.util.List;
  * pages. The checks are attached to it ({@link Checks#attach}), so they end up in report.json.
  * <p>
  * Status marks : green check = passed, red cross = failed, gray dot = informational. Names and values are wrapped.
+ * The {@link Check#attempts} checks are not painted (they may differ from run to run).
  */
 public class ChecksView extends Component {
 
@@ -95,6 +96,10 @@ public class ChecksView extends Component {
         int y = title == null || title.isEmpty() ? 0 : TextBlock.lineHeight(titleFont()) + 8;
         List<Row> list = new ArrayList<>();
         for (Check check : checks) {
+            if (check.isAttempts()) {
+                // may differ from run to run : report.json only
+                continue;
+            }
             List<String> names = TextBlock.wrap(check.name(), font, nameWidth);
             List<String> values = TextBlock.wrap(check.value(), font, valueWidth);
             int h = Math.max(names.size(), values.size()) * lineHeight;

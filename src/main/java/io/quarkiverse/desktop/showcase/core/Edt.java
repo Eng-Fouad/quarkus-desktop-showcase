@@ -197,11 +197,17 @@ public final class Edt {
     }
 
     /**
-     * {@code true} when one of the windows of this application is the focused window. Check it right before each Robot
-     * key press : keyboard input must never go to another application.
+     * {@code true} when one of the windows of this application is the focused window and no other process owns the
+     * foreground of the desktop. Check it right before each Robot key press : keyboard input must never go to another
+     * application.
+     * <p>
+     * Java alone is not enough on Windows : a window of a background process can be the focused window of its process
+     * (Windows activated it within the process but refused the foreground) while the keyboard input goes to another
+     * application. The foreground window is therefore also asked to Windows ({@link Foreground}).
      */
     public static boolean ownsFocus() {
-        return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() != null;
+        return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() != null
+                && !Boolean.FALSE.equals(Foreground.thisProcess());
     }
 
     static synchronized ScheduledExecutorService scheduler() {

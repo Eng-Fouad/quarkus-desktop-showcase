@@ -132,7 +132,7 @@
                 </os>
             </activation>
             <properties>
-                <quarkus.native.additional-build-args-append>--add-opens=java.desktop/java.awt=ALL-UNNAMED,--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED</quarkus.native.additional-build-args-append>
+                <quarkus.native.additional-build-args-append>--enable-native-access=ALL-UNNAMED,--add-opens=java.desktop/java.awt=ALL-UNNAMED,--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED</quarkus.native.additional-build-args-append>
             </properties>
         </profile>
         <profile>

@@ -43,6 +43,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -196,7 +197,7 @@ public class RobotPage implements FeaturePage {
     private List<Check> run(Pattern pattern, Pad pad, TextField field, List<String> keyLog) throws Exception {
         List<Check> checks = new ArrayList<>();
         Point saved;
-        try (DesktopSupport.RobotSession session = new DesktopSupport.RobotSession()) {
+        try (RobotSession session = RobotSession.open()) {
             saved = session.savedPointer();
             Robot robot = session.robot();
             Rectangle bounds = DesktopSupport.onEdt(() -> new Rectangle(pattern.getLocationOnScreen(),
@@ -217,10 +218,32 @@ public class RobotPage implements FeaturePage {
                 return checks;
             }
             captures(checks, robot, bounds);
-            if (mouse(checks, session, pad, padOrigin)) {
-                if (session.ensureFocus(field)) {
-                    keyboard(checks, session, field, keyLog);
-                } else {
+            // the mouse sequence, then the keyboard, again (at most ATTEMPTS times, the window focused again first) while
+            // an event is missing : another application may take the foreground at any time
+            List<Check> mouseChecks = new ArrayList<>();
+            boolean mouseDone = false;
+            int attempt = 0;
+            while (!complete(mouseChecks) && attempt < ATTEMPTS && session.ensureFocus(pad)) {
+                attempt++;
+                mouseChecks = new ArrayList<>();
+                mouseDone = mouse(mouseChecks, session, pad, padOrigin);
+            }
+            checks.add(Check.attempts("mouse", attempt));
+            checks.addAll(mouseChecks);
+            if (attempt == 0) {
+                checks.add(Check.info("mouse buttons", DesktopSupport.NOT_FOCUSED));
+            }
+            if (mouseDone) {
+                List<Check> keyChecks = new ArrayList<>();
+                attempt = 0;
+                while (!complete(keyChecks) && attempt < ATTEMPTS && session.ensureFocus(field)) {
+                    attempt++;
+                    keyChecks = new ArrayList<>();
+                    keyboard(keyChecks, session, field, keyLog);
+                }
+                checks.add(Check.attempts("keyboard", attempt));
+                checks.addAll(keyChecks);
+                if (attempt == 0) {
                     checks.add(Check.info("keyboard", DesktopSupport.NOT_FOCUSED));
                 }
             }
@@ -228,6 +251,17 @@ public class RobotPage implements FeaturePage {
         checks.add(Checks.expect("mouse pointer moved back", true, () -> saved != null
                 && DesktopSupport.await(() -> saved.equals(MouseInfo.getPointerInfo().getLocation()), 1000)));
         return checks;
+    }
+
+    /** Attempts of the mouse and of the keyboard sequences. */
+    private static final int ATTEMPTS = 3;
+
+    /**
+     * {@code true} when {@code checks} is not empty, has no failed check and no skipped input.
+     */
+    private static boolean complete(List<Check> checks) {
+        return !checks.isEmpty() && checks.stream().noneMatch(c -> Boolean.FALSE.equals(c.ok())
+                || c.value().startsWith("skipped"));
     }
 
     private void captures(List<Check> checks, Robot robot, Rectangle bounds) {
@@ -272,7 +306,7 @@ public class RobotPage implements FeaturePage {
     /**
      * @return {@code false} when the input was skipped (no showcase window focused)
      */
-    private static boolean mouse(List<Check> checks, DesktopSupport.RobotSession session, Pad pad, Point origin)
+    private static boolean mouse(List<Check> checks, RobotSession session, Pad pad, Point origin)
             throws Exception {
         Point target = new Point(origin.x + 60, origin.y + 40);
         session.move(new Point(target.x - 20, target.y - 10));
@@ -344,7 +378,7 @@ public class RobotPage implements FeaturePage {
         return interval instanceof Integer i ? Math.min(i, 2000) : 500;
     }
 
-    private static boolean click(DesktopSupport.RobotSession session, int mask) {
+    private static boolean click(RobotSession session, int mask) {
         if (!session.press(mask)) {
             return false;
         }
@@ -352,9 +386,13 @@ public class RobotPage implements FeaturePage {
         return true;
     }
 
-    private static void keyboard(List<Check> checks, DesktopSupport.RobotSession session, TextField field,
+    private static void keyboard(List<Check> checks, RobotSession session, TextField field,
             List<String> keyLog) throws Exception {
-        boolean focused = DesktopSupport.onEdt(field::requestFocusInWindow);
+        boolean focused = DesktopSupport.onEdt(() -> {
+            // a new attempt starts from an empty field
+            field.setText("");
+            return field.requestFocusInWindow();
+        });
         boolean owner = DesktopSupport.await(() -> KeyboardFocusManager.getCurrentKeyboardFocusManager()
                 .getFocusOwner() == field, 2000);
         if (!focused || !owner) {

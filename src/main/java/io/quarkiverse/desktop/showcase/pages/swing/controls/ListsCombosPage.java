@@ -50,6 +50,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.swing.controls.ControlsSupport.Readiness;
@@ -196,10 +197,18 @@ public class ListsCombosPage implements FeaturePage {
      * Opens the popup of {@code combo}, renders it, records where PopupFactory put it, and closes it.
      */
     private CompletionStage<Void> popup(String name, JComboBox<String> combo) {
-        if (!Edt.ownsFocus()) {
-            popupChecks.add(Check.info(name, "skipped: not focused"));
-            return CompletableFuture.completedFuture(null);
-        }
+        // a combo box popup closes when its window loses the focus
+        return Focus.acquire(javax.swing.SwingUtilities.getWindowAncestor(combo)).thenCompose(attempts -> {
+            popupChecks.add(Check.attempts(name + " : window focused", attempts));
+            if (attempts == 0) {
+                popupChecks.add(Check.info(name, "skipped: not focused"));
+                return CompletableFuture.completedFuture(null);
+            }
+            return shownPopup(name, combo);
+        });
+    }
+
+    private CompletionStage<Void> shownPopup(String name, JComboBox<String> combo) {
         combo.setPopupVisible(true);
         return Edt.rounds(3).thenAccept(v -> {
             BasicComboPopup popup = (BasicComboPopup) combo.getUI().getAccessibleChild(combo, 0);

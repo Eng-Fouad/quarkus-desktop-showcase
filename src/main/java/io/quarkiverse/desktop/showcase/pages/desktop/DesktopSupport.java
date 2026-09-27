@@ -1,29 +1,23 @@
 package io.quarkiverse.desktop.showcase.pages.desktop;
 
-import java.awt.AWTException;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.MouseInfo;
 import java.awt.Point;
-import java.awt.PointerInfo;
 import java.awt.RenderingHints;
-import java.awt.Robot;
 import java.awt.Window;
-import java.awt.event.InputEvent;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.concurrent.Callable;
 
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 
 /**
  * Helpers shared by the pages of the "Data Transfer &amp; Desktop" category (AWT only : used by the AWT pages and by the
@@ -80,11 +74,7 @@ public final class DesktopSupport {
      * The window containing {@code component} (without {@code SwingUtilities} : AWT only).
      */
     public static Window windowOf(Component component) {
-        Component c = component;
-        while (c != null && !(c instanceof Window)) {
-            c = c.getParent();
-        }
-        return (Window) c;
+        return RobotSession.windowOf(component);
     }
 
     /**
@@ -255,210 +245,6 @@ public final class DesktopSupport {
                 g.drawString(text, x, (height - fm.getHeight()) / 2 + fm.getAscent());
             } finally {
                 g.dispose();
-            }
-        }
-    }
-
-    /**
-     * Robot input from a background thread, following the safety rules of the showcase : the mouse pointer is moved back
-     * where it was and every pressed button or key is released when the session is closed, and keys are only pressed
-     * while a showcase window is focused ({@link Edt#ownsFocus()}).
-     */
-    public static final class RobotSession implements AutoCloseable {
-
-        private final Robot robot;
-        private final Point pointer;
-        private final Set<Integer> buttons = new LinkedHashSet<>();
-        private final Set<Integer> keys = new LinkedHashSet<>();
-        private String lastMismatch = "";
-
-        public RobotSession() throws AWTException {
-            if (Edt.isEdt()) {
-                throw new IllegalStateException("Robot input must not run on the EDT");
-            }
-            robot = new Robot();
-            robot.setAutoDelay(0);
-            robot.setAutoWaitForIdle(false);
-            PointerInfo info = MouseInfo.getPointerInfo();
-            pointer = info == null ? null : info.getLocation();
-        }
-
-        public Robot robot() {
-            return robot;
-        }
-
-        /** Where the pointer was when the session started ({@code null} if unknown). */
-        public Point savedPointer() {
-            return pointer;
-        }
-
-        public void move(Point p) {
-            robot.mouseMove(p.x, p.y);
-        }
-
-        /**
-         * Moves from {@code from} to {@code to} in {@code steps} steps, {@code stepMillis} apart.
-         */
-        public void glide(Point from, Point to, int steps, int stepMillis) {
-            for (int i = 1; i <= steps; i++) {
-                robot.mouseMove(from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps);
-                sleep(stepMillis);
-            }
-        }
-
-        /**
-         * Presses the mouse buttons {@code mask} ({@link InputEvent#BUTTON1_DOWN_MASK}...) if a showcase window is
-         * focused.
-         *
-         * @return {@code false} (nothing pressed) when no showcase window is focused
-         */
-        public boolean press(int mask) {
-            if (!Edt.ownsFocus()) {
-                return false;
-            }
-            robot.mousePress(mask);
-            buttons.add(mask);
-            return true;
-        }
-
-        public void release(int mask) {
-            if (buttons.remove(mask)) {
-                robot.mouseRelease(mask);
-            }
-        }
-
-        public void wheel(int notches) {
-            robot.mouseWheel(notches);
-        }
-
-        /**
-         * Presses (and keeps pressed) {@code keyCode} if a showcase window is focused.
-         *
-         * @return {@code false} (nothing pressed) when no showcase window is focused
-         */
-        public boolean keyPress(int keyCode) {
-            // the previous key events are handled first : AWT translates a key into a character with the keyboard state
-            // of the moment it handles the key, so a Shift pressed right after a key could turn "a" into "A"
-            robot.delay(20);
-            if (!java.awt.EventQueue.isDispatchThread()) {
-                robot.waitForIdle();
-            }
-            if (!Edt.ownsFocus()) {
-                return false;
-            }
-            robot.keyPress(keyCode);
-            keys.add(keyCode);
-            return true;
-        }
-
-        public void keyRelease(int keyCode) {
-            if (keys.remove(keyCode)) {
-                robot.keyRelease(keyCode);
-            }
-        }
-
-        /**
-         * Types {@code keyCode} (press and release) if a showcase window is focused.
-         *
-         * @return {@code false} (nothing typed) when no showcase window is focused
-         */
-        public boolean type(int keyCode) {
-            if (!keyPress(keyCode)) {
-                return false;
-            }
-            keyRelease(keyCode);
-            return true;
-        }
-
-        /**
-         * The color of the screen pixel at {@code p} (RGB, no alpha).
-         */
-        public int pixel(Point p) {
-            return robot.getPixelColor(p.x, p.y).getRGB() & 0xFFFFFF;
-        }
-
-        /**
-         * Waits until the screen pixels at {@code probes} have their expected colors ({@code probes} maps a point to an
-         * RGB color), i.e. until the page is visible on screen : windows of other applications (or other showcase
-         * processes) may cover it. The window of {@code component} is brought to the front between the attempts.
-         *
-         * @return {@code false} if the page stayed covered
-         */
-        public boolean awaitVisible(Component component, java.util.Map<Point, Integer> probes) throws Exception {
-            for (int attempt = 0; attempt < 8; attempt++) {
-                boolean visible = true;
-                for (var probe : probes.entrySet()) {
-                    int found = pixel(probe.getKey());
-                    if (found != (probe.getValue() & 0xFFFFFF)) {
-                        visible = false;
-                        lastMismatch = rgb(found) + " instead of " + rgb(probe.getValue()) + " at "
-                                + probe.getKey().x + "," + probe.getKey().y;
-                        break;
-                    }
-                }
-                if (visible) {
-                    return true;
-                }
-                onEdt(() -> {
-                    Window window = windowOf(component);
-                    if (window != null) {
-                        window.toFront();
-                    }
-                    return null;
-                });
-                sleep(400);
-            }
-            return false;
-        }
-
-        /**
-         * Makes sure that a showcase window is focused, asking again for the focus of the window of {@code component}
-         * if another application took it (the page keeps the machine-wide focus lock of the showcase processes, but
-         * other applications may still activate a window). Windows may refuse : the caller then skips its input.
-         *
-         * @return {@code true} if a showcase window is focused
-         */
-        public boolean ensureFocus(Component component) throws Exception {
-            if (Edt.ownsFocus()) {
-                return true;
-            }
-            onEdt(() -> {
-                Window window = windowOf(component);
-                if (window != null) {
-                    window.toFront();
-                    window.requestFocus();
-                }
-                return null;
-            });
-            return await(Edt::ownsFocus, 2000);
-        }
-
-        /**
-         * The last pixel that did not have its expected color in {@link #awaitVisible} (for diagnostics : it depends on
-         * the windows of the desktop, never put it in a check value).
-         */
-        public String lastMismatch() {
-            return lastMismatch;
-        }
-
-        /** Releases everything still pressed. */
-        public void releaseAll() {
-            for (Integer key : List.copyOf(keys)) {
-                keyRelease(key);
-            }
-            for (Integer mask : List.copyOf(buttons)) {
-                release(mask);
-            }
-        }
-
-        /**
-         * Releases everything still pressed and moves the pointer back.
-         */
-        @Override
-        public void close() {
-            releaseAll();
-            if (pointer != null) {
-                robot.mouseMove(pointer.x, pointer.y);
             }
         }
     }

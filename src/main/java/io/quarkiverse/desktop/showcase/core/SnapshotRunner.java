@@ -169,7 +169,7 @@ public class SnapshotRunner {
             if (lock != null) {
                 result.put("focusLock", lock.acquired() ? "acquired" : "not acquired");
                 ShowcaseMode.realInput(true);
-                focus = bringToFront(window);
+                focus = bringToFront(window, result);
             }
             return focus.thenComposeAsync(v -> capturePage(window, page, out, result, errors, start), Edt.EDT)
                     .whenCompleteAsync((r, error) -> {
@@ -181,14 +181,20 @@ public class SnapshotRunner {
         }, Edt.EDT);
     }
 
-    private CompletionStage<Void> bringToFront(MainWindow window) {
+    /**
+     * Brings the main window to the front with {@link Focus#acquire} (the focus of this process and the foreground of
+     * the desktop, a few attempts) : the attempts are recorded in the page result ({@code focusAttempts}, 0 when the
+     * window could not get the focus).
+     */
+    private CompletionStage<Void> bringToFront(MainWindow window, Map<String, Object> result) {
         Window w = window.window();
         w.setAutoRequestFocus(true);
-        w.toFront();
-        w.requestFocus();
-        return Edt.until(Edt::ownsFocus, 2000, "window focused")
-                .handle((v, error) -> {
-                    LOG.infof("Page window %s", error == null ? "focused" : "not focused (focus request refused)");
+        return Focus.acquire(w)
+                .handle((attempts, error) -> {
+                    int n = error == null ? attempts : 0;
+                    result.put("focusAttempts", n);
+                    LOG.infof("Page window %s", n > 0 ? "focused (attempt " + n + ")"
+                            : "not focused (foreground : " + Foreground.describe() + ")");
                     return null;
                 });
     }

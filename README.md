@@ -184,7 +184,25 @@ public class ShapesPage implements FeaturePage {
 - **Resources**: under `src/main/resources/showcase/<group>/...`, read with `Edt.resource*` (never show a resource URL:
   `jar:` on the JVM, `resource:` in a native executable).
 - **Focus**: a page needing the keyboard focus or real input (Robot) returns `needsFocus() = true`: it runs while the
-  showcase holds a machine-wide lock, after its window was brought to the front.
+  showcase holds a machine-wide lock, after its window was brought to the front. On a live desktop another application
+  may take the foreground at any time, and Windows refuses the foreground to a background process that did not receive
+  the last input, while it may still activate the window inside the process (Java then reports a focused window that
+  gets no keyboard input). The core handles it:
+  - `Edt.ownsFocus()` is true only when a showcase window is focused **and** no other process owns the foreground
+    (`core.Foreground` asks Windows with `GetForegroundWindow`, through the Foreign Function and Memory API; the
+    environment key `foregroundCheck` shows it);
+  - `Focus.acquire(window)` brings a window to the front and waits until it really has the focus (at most 4 attempts);
+    the later attempts click the middle of the title bar of a decorated showcase window, as a user would, only where
+    `WindowFromPoint` says the window under the point belongs to the showcase, and move the pointer back;
+  - `RobotSession` (from a background thread) sends keys and mouse buttons only when `Edt.ownsFocus()`, waits for each
+    key press and release to be dispatched before the next input (a modifier pressed too early or released too late
+    changes the result), restores the pointer and releases everything when closed; `nativeKeys(true)` for keys that a
+    native loop consumes (menus), `idleAfterInput(false)` during a drag and drop;
+  - a Robot sequence whose effect is missing is done again (bounded, the window focused again first), and the number
+    of attempts is recorded with `Check.attempts(action, n)`: an informational check in `report.json` only (not painted
+    by `ChecksView`), whose differences `Compare` reports as `attempts:` notes, not as mismatches.
+- **Shared helpers**: `core.Grid` (captioned tiles painted offscreen, pixel probes) and `core.Slot` (an image shown once
+  ready), `core.RobotSession`, `core.Focus`.
 - **Safety** (the showcase runs on real desktops): never print to a real printer (only `StreamPrintService` PostScript
   into memory or files), close print and page dialogs programmatically, never call `Desktop.browse/open/mail/print/edit`
   or `TrayIcon.displayMessage` unless allowed (`-Dshowcase.sideEffects=true` allows every side effect, a comma

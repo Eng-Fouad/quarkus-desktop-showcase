@@ -56,6 +56,8 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -748,10 +750,7 @@ public class AwtEventsPage implements FeaturePage {
             robotView.setChecks(List.of(Check.info("Robot input", "skipped: snapshot mode only")));
             return CompletableFuture.completedFuture(null);
         }
-        if (!Edt.ownsFocus()) {
-            robotView.setChecks(List.of(Check.info("Robot input", "skipped: not focused")));
-            return CompletableFuture.completedFuture(null);
-        }
+        // the target frame gets the focus below (Focus.acquire) : this process may have lost the foreground meanwhile
         java.awt.Window previouslyFocused = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
                 .getFocusedWindow();
         // the Robot target : an always-on-top frame of its own (the windows of other applications never cover it)
@@ -762,19 +761,24 @@ public class AwtEventsPage implements FeaturePage {
         java.awt.Rectangle area = AwtSupport.secondaryArea(targetFrame.getWidth(), targetFrame.getHeight());
         targetFrame.setLocation(area.x, area.y);
         targetFrame.setVisible(true);
-        targetFrame.toFront();
-        targetFrame.requestFocus();
         target.requestFocusInWindow();
-        return Edt.until(target::isFocusOwner, 3000, "target canvas focused").handle((v, error) -> error == null)
+        java.awt.Frame frame = targetFrame;
+        return Focus.acquire(frame)
+                .thenCompose(attempts -> {
+                    target.requestFocusInWindow();
+                    return Edt.until(target::isFocusOwner, 3000, "target canvas focused")
+                            .handle((v, error) -> error == null ? attempts : 0);
+                })
                 .thenCompose(focused -> {
-                    if (!focused) {
-                        return CompletableFuture.completedFuture(List.of(Check.info("Robot input",
-                                "skipped: not focused")));
+                    if (focused == 0) {
+                        return CompletableFuture.completedFuture(List.of(Check.attempts("target frame focused", 0),
+                                Check.info("Robot input", "skipped: not focused")));
                     }
                     Point origin = target.getLocationOnScreen();
                     boolean capsLock = capsLock();
-                    return Edt.background(() -> drive(target, origin, !capsLock)).thenApply(result -> {
+                    return Edt.background(() -> drive(target, global, origin, !capsLock)).thenApply(result -> {
                         List<Check> checks = new ArrayList<>(result);
+                        checks.add(0, Check.attempts("target frame focused", focused));
                         checks.add(0, Check.info("keyboard input", capsLock ? "skipped: caps lock is on" : "sent"));
                         checks.add(1, Check.info("keyboard layout (input method locale)", AwtSupport.inputLocale()));
                         List<String> log = new ArrayList<>(target.log);
@@ -813,13 +817,21 @@ public class AwtEventsPage implements FeaturePage {
         }
     }
 
+    /** Expected results of the Robot sequence (see {@link #results}). */
+    private static final List<String> EXPECTED_MOUSE = List.of("MOUSE_ENTERED (40,40)", "1 2 1",
+            "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1 clicks=1", "1 -2");
+    private static final String EXPECTED_KEYS = "A Shift A Space Enter Left Home Ctrl B";
+    /** Attempts of the Robot sequence : another application may take the foreground at any time. */
+    private static final int ATTEMPTS = 3;
+
     /**
      * Runs on a background thread. Every press is preceded by a pixel probe of the click point (the canvas color) and
-     * every key press by the focus check of {@link RobotSupport#key}.
+     * by the focus check of {@link RobotSession}. The whole sequence runs again (at most {@link #ATTEMPTS} times, the
+     * target frame focused again first) when an event is missing.
      */
-    private List<Check> drive(RecordingCanvas target, Point origin, boolean keys) throws Exception {
+    private List<Check> drive(RecordingCanvas target, List<String> global, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
-        try (RobotSupport robot = RobotSupport.create()) {
+        try (RobotSession robot = RobotSession.open()) {
             // the new frame is painted
             robot.delay(300);
             robot.idle();
@@ -827,93 +839,131 @@ public class AwtEventsPage implements FeaturePage {
             Color seen = robot.robot().getPixelColor(probe.x, probe.y);
             checks.add(Checks.expect("Robot.getPixelColor inside the canvas", Checks.argb(0xFF000000 | CANVAS_COLOR),
                     () -> Checks.argb(seen.getRGB())));
-            // start outside the canvas (in the frame insets, still our window), then record
-            robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
-            robot.delay(100);
-            target.log.clear();
-            target.recording = true;
-
-            robot.move(new Point(origin.x + 40, origin.y + 40));
-            robot.move(new Point(origin.x + 60, origin.y + 50));
-            Point click = new Point(origin.x + 60, origin.y + 50);
-            if (robot.pixelIs(click, CANVAS_COLOR)) {
-                robot.press(InputEvent.BUTTON1_DOWN_MASK);
-                robot.release(InputEvent.BUTTON1_DOWN_MASK);
-                robot.press(InputEvent.BUTTON1_DOWN_MASK);
-                robot.release(InputEvent.BUTTON1_DOWN_MASK);
-            }
-            robot.delay(600);
-            if (robot.pixelIs(click, CANVAS_COLOR)) {
-                robot.press(InputEvent.BUTTON1_DOWN_MASK);
-                robot.move(new Point(origin.x + 100, origin.y + 70));
-                robot.move(new Point(origin.x + 140, origin.y + 90));
-                robot.release(InputEvent.BUTTON1_DOWN_MASK);
-            }
-            robot.delay(600);
-            Point right = new Point(origin.x + 140, origin.y + 90);
-            if (robot.pixelIs(right, CANVAS_COLOR)) {
-                robot.press(InputEvent.BUTTON3_DOWN_MASK);
-                robot.release(InputEvent.BUTTON3_DOWN_MASK);
-            }
-            if (robot.pixelIs(right, CANVAS_COLOR)) {
-                robot.wheel(1);
-                robot.wheel(-2);
-            }
-            if (keys) {
-                robot.key(KeyEvent.VK_A);
-                robot.key(KeyEvent.VK_SHIFT, KeyEvent.VK_A);
-                robot.key(KeyEvent.VK_SPACE);
-                robot.key(KeyEvent.VK_ENTER);
-                robot.key(KeyEvent.VK_LEFT);
-                robot.key(KeyEvent.VK_HOME);
-                robot.key(KeyEvent.VK_CONTROL, KeyEvent.VK_B);
-            }
-            robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
-            robot.delay(200);
-            robot.idle();
-            // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
-            captures.put("canvas-screen", robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
-                    CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16)));
-            target.recording = false;
+            int attempt = 0;
+            List<String> log;
+            do {
+                attempt++;
+                if (attempt > 1 && !robot.ensureFocus(target)) {
+                    break;
+                }
+                robot.skipped().clear();
+                global.clear();
+                sequence(robot, target, origin, keys);
+                log = new ArrayList<>(target.log);
+            } while (!complete(log, keys) && attempt < ATTEMPTS);
+            checks.add(Check.attempts("Robot mouse and keyboard sequence", attempt));
             if (!robot.skipped().isEmpty()) {
                 checks.add(Check.info("skipped inputs", "skipped: " + String.join(", ", robot.skipped())));
             }
-            List<String> log = new ArrayList<>(target.log);
-            checks.add(Checks.expect("mouse enters the canvas", "MOUSE_ENTERED (40,40)", () -> log.stream()
-                    .filter(entry -> entry.startsWith("MOUSE_ENTERED")).findFirst().orElse("none")));
-            checks.add(Checks.expect("mouse clicks : click counts", "1 2 1",
-                    () -> String.join(" ", log.stream().filter(entry -> entry.startsWith("MOUSE_CLICKED"))
-                            .map(entry -> entry.replaceAll(".*clicks=(\\d+).*", "$1")).toList())));
-            checks.add(Checks.expect("drag : MOUSE_DRAGGED events, then the release", "(100,70) (140,90) / MOUSE_RELEASED "
-                    + "(140,90) button=1 clicks=1", () -> String.join(" ", log.stream()
-                            .filter(entry -> entry.startsWith("MOUSE_DRAGGED"))
-                            .map(entry -> entry.replaceAll("MOUSE_DRAGGED (\\(\\d+,\\d+\\)).*", "$1")).toList())
-                            + " / " + log.stream().filter(entry -> entry.startsWith("MOUSE_RELEASED (140,90) button=1"))
-                                    .findFirst().orElse("none")));
+            List<String> results = results(target.log, keys);
+            checks.add(Checks.expect("mouse enters the canvas", EXPECTED_MOUSE.get(0), () -> results.get(0)));
+            checks.add(Checks.expect("mouse clicks : click counts", EXPECTED_MOUSE.get(1), () -> results.get(1)));
+            checks.add(Checks.expect("drag : MOUSE_DRAGGED events, then the release", EXPECTED_MOUSE.get(2),
+                    () -> results.get(2)));
+            List<String> finalLog = new ArrayList<>(target.log);
             checks.add(Checks.expect("right button : popup trigger (Windows : on release, Linux : on press)",
                     io.quarkiverse.desktop.showcase.core.Platforms.isWindows() ? "MOUSE_RELEASED" : "MOUSE_PRESSED",
-                    () -> log.stream().filter(entry -> entry.contains("popupTrigger"))
+                    () -> finalLog.stream().filter(entry -> entry.contains("popupTrigger"))
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
-            checks.add(Checks.expect("wheel rotations", "1 -2", () -> String.join(" ", log.stream()
-                    .filter(entry -> entry.startsWith("MOUSE_WHEEL"))
-                    .map(entry -> entry.replaceAll(".*rotation=(-?\\d+).*", "$1")).toList())));
+            checks.add(Checks.expect("wheel rotations", EXPECTED_MOUSE.get(3), () -> results.get(3)));
             if (keys) {
-                checks.add(Checks.expect("pressed keys", "A Shift A Space Enter Left Home Ctrl B",
-                        () -> String.join(" ", log.stream().filter(entry -> entry.startsWith("KEY_PRESSED"))
-                                .map(entry -> entry.replaceAll("KEY_PRESSED code=(.*?) char=.*", "$1")).toList())));
+                checks.add(Checks.expect("pressed keys", EXPECTED_KEYS, () -> results.get(4)));
                 // the characters depend on the keyboard layout (Arabic letters with an Arabic layout)
-                checks.add(Check.info("typed characters (keyboard layout dependent)", String.join(" ", log.stream()
+                checks.add(Check.info("typed characters (keyboard layout dependent)", String.join(" ", finalLog.stream()
                         .filter(entry -> entry.startsWith("KEY_TYPED"))
                         .map(entry -> entry.replaceAll(".*char=('.'|\\S+).*", "$1")).toList())));
                 checks.add(Checks.expect("typed characters of Space, Enter, Ctrl+B", "' ' \\u000A \\u0002",
-                        () -> String.join(" ", log.stream().filter(entry -> entry.startsWith("KEY_TYPED"))
+                        () -> String.join(" ", finalLog.stream().filter(entry -> entry.startsWith("KEY_TYPED"))
                                 .map(entry -> entry.replaceAll(".*char=('.'|\\S+).*", "$1")).skip(2).toList())));
-                checks.add(Checks.expect("Shift key location", "LEFT", () -> log.stream()
+                checks.add(Checks.expect("Shift key location", "LEFT", () -> finalLog.stream()
                         .filter(entry -> entry.startsWith("KEY_PRESSED code=Shift"))
                         .map(entry -> entry.replaceAll(".*location=(\\S+).*", "$1")).findFirst().orElse("none")));
             }
         }
         return checks;
+    }
+
+    /**
+     * {@code true} when the log has every expected event of the sequence.
+     */
+    private static boolean complete(List<String> log, boolean keys) {
+        List<String> results = results(log, keys);
+        return results.subList(0, 4).equals(EXPECTED_MOUSE) && (!keys || results.get(4).equals(EXPECTED_KEYS))
+                && log.stream().anyMatch(entry -> entry.contains("popupTrigger"));
+    }
+
+    /**
+     * The first mouse entry, the click counts, the drag, the wheel rotations and the pressed keys of {@code events}.
+     */
+    private static List<String> results(List<String> events, boolean keys) {
+        List<String> log = new ArrayList<>(events);
+        List<String> results = new ArrayList<>();
+        results.add(log.stream().filter(entry -> entry.startsWith("MOUSE_ENTERED")).findFirst().orElse("none"));
+        results.add(String.join(" ", log.stream().filter(entry -> entry.startsWith("MOUSE_CLICKED"))
+                .map(entry -> entry.replaceAll(".*clicks=(\\d+).*", "$1")).toList()));
+        results.add(String.join(" ", log.stream().filter(entry -> entry.startsWith("MOUSE_DRAGGED"))
+                .map(entry -> entry.replaceAll("MOUSE_DRAGGED (\\(\\d+,\\d+\\)).*", "$1")).toList())
+                + " / " + log.stream().filter(entry -> entry.startsWith("MOUSE_RELEASED (140,90) button=1"))
+                        .findFirst().orElse("none"));
+        results.add(String.join(" ", log.stream().filter(entry -> entry.startsWith("MOUSE_WHEEL"))
+                .map(entry -> entry.replaceAll(".*rotation=(-?\\d+).*", "$1")).toList()));
+        results.add(keys ? String.join(" ", log.stream().filter(entry -> entry.startsWith("KEY_PRESSED"))
+                .map(entry -> entry.replaceAll("KEY_PRESSED code=(.*?) char=.*", "$1")).toList()) : "");
+        return results;
+    }
+
+    /**
+     * One run of the Robot sequence : mouse moves, clicks, a drag, the right button, the wheel and keys.
+     */
+    private void sequence(RobotSession robot, RecordingCanvas target, Point origin, boolean keys) {
+        // start outside the canvas (in the frame insets, still our window), then record
+        robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
+        robot.delay(100);
+        target.log.clear();
+        target.recording = true;
+
+        robot.move(new Point(origin.x + 40, origin.y + 40));
+        robot.move(new Point(origin.x + 60, origin.y + 50));
+        Point click = new Point(origin.x + 60, origin.y + 50);
+        if (robot.pixelIs(click, CANVAS_COLOR)) {
+            robot.press(InputEvent.BUTTON1_DOWN_MASK);
+            robot.release(InputEvent.BUTTON1_DOWN_MASK);
+            robot.press(InputEvent.BUTTON1_DOWN_MASK);
+            robot.release(InputEvent.BUTTON1_DOWN_MASK);
+        }
+        robot.delay(600);
+        if (robot.pixelIs(click, CANVAS_COLOR)) {
+            robot.press(InputEvent.BUTTON1_DOWN_MASK);
+            robot.move(new Point(origin.x + 100, origin.y + 70));
+            robot.move(new Point(origin.x + 140, origin.y + 90));
+            robot.release(InputEvent.BUTTON1_DOWN_MASK);
+        }
+        robot.delay(600);
+        Point right = new Point(origin.x + 140, origin.y + 90);
+        if (robot.pixelIs(right, CANVAS_COLOR)) {
+            robot.press(InputEvent.BUTTON3_DOWN_MASK);
+            robot.release(InputEvent.BUTTON3_DOWN_MASK);
+        }
+        if (robot.pixelIs(right, CANVAS_COLOR)) {
+            robot.wheel(1);
+            robot.wheel(-2);
+        }
+        if (keys) {
+            robot.key(KeyEvent.VK_A);
+            robot.key(KeyEvent.VK_SHIFT, KeyEvent.VK_A);
+            robot.key(KeyEvent.VK_SPACE);
+            robot.key(KeyEvent.VK_ENTER);
+            robot.key(KeyEvent.VK_LEFT);
+            robot.key(KeyEvent.VK_HOME);
+            robot.key(KeyEvent.VK_CONTROL, KeyEvent.VK_B);
+        }
+        robot.move(new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4));
+        robot.delay(200);
+        robot.idle();
+        // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
+        captures.put("canvas-screen", robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
+                CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16)));
+        target.recording = false;
     }
 
     private static String counts(List<String> log) {

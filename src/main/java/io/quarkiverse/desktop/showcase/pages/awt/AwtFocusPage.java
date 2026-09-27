@@ -49,7 +49,9 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -357,11 +359,14 @@ public class AwtFocusPage implements FeaturePage {
                 focusView.setChecks(java.util.List.of(Check.info("focus changes", "skipped: snapshot mode only")));
                 return CompletableFuture.completedFuture(null);
             }
-            if (!Edt.ownsFocus()) {
-                focusView.setChecks(java.util.List.of(Check.info("focus changes", "skipped: not focused")));
-                return CompletableFuture.completedFuture(null);
-            }
-            return focusChanges(comps);
+            // the page window focused, this process owning the foreground
+            return Focus.acquire(RobotSession.windowOf(comps.b1)).thenCompose(attempts -> {
+                if (attempts == 0) {
+                    focusView.setChecks(java.util.List.of(Check.info("focus changes", "skipped: not focused")));
+                    return CompletableFuture.completedFuture(null);
+                }
+                return focusChanges(comps);
+            });
         });
     }
 
@@ -446,53 +451,8 @@ public class AwtFocusPage implements FeaturePage {
                     comps.log.clear();
                 })
                 // Robot : Tab, Shift+Tab, the custom traversal key, keys for the dispatcher and the post processor
-                .thenCompose(v -> focus(comps.b1, () -> comps.b1.requestFocusInWindow()))
-                .thenCompose(v -> Edt.background(() -> {
-                    try (RobotSupport robot = RobotSupport.create()) {
-                        java.util.List<String> skipped = new ArrayList<>();
-                        for (int[] keys : new int[][] { { KeyEvent.VK_TAB }, { KeyEvent.VK_TAB },
-                                { KeyEvent.VK_SHIFT, KeyEvent.VK_TAB } }) {
-                            if (!robot.key(keys)) {
-                                skipped.add("tab");
-                            }
-                            robot.delay(150);
-                        }
-                        return skipped;
-                    }
-                }))
-                .thenCompose(skipped -> Edt.rounds(3).thenApply(v -> skipped))
-                .thenAccept(skipped -> {
-                    java.util.List<String> gained = gained(comps);
-                    checks.add(skipped.isEmpty()
-                            ? Checks.expect("Robot Tab, Tab, Shift+Tab from b1", "b1 UNKNOWN, t1 TRAVERSAL_FORWARD, "
-                                    + "l1 TRAVERSAL_FORWARD, t1 TRAVERSAL_BACKWARD", () -> String.join(", ", gained))
-                            : Check.info("Robot Tab, Tab, Shift+Tab from b1", "skipped: not focused"));
-                    comps.log.clear();
-                })
-                .thenCompose(v -> focus(comps.canvas, () -> comps.canvas.requestFocusInWindow()))
-                .thenCompose(v -> Edt.background(() -> {
-                    try (RobotSupport robot = RobotSupport.create()) {
-                        boolean sent = robot.key(KeyEvent.VK_F7) && robot.key(KeyEvent.VK_F9);
-                        robot.delay(100);
-                        sent &= robot.key(KeyEvent.VK_RIGHT);
-                        robot.delay(200);
-                        return sent;
-                    }
-                }))
-                .thenCompose(sent -> Edt.rounds(3).thenApply(v -> sent))
-                .thenAccept(sent -> {
-                    if (!sent) {
-                        checks.add(Check.info("Robot F7, F9, Right on the Canvas", "skipped: not focused"));
-                        return;
-                    }
-                    checks.add(Checks.expect("KeyEventDispatcher consumes F7 (the canvas never sees it)",
-                            "dispatcher KEY_PRESSED KEY_RELEASED / canvas F9",
-                            () -> "dispatcher " + String.join(" ", dispatched) + " / canvas " + String.join(" ", canvasKeys)));
-                    checks.add(Checks.expect("KeyEventPostProcessor sees the unconsumed F9", "KEY_PRESSED KEY_RELEASED",
-                            () -> String.join(" ", postProcessed)));
-                    checks.add(Checks.expect("custom forward traversal key (Right) of the Canvas : focus owner", "cycle",
-                            () -> name(kfm.getFocusOwner())));
-                })
+                .thenCompose(v -> robotTabs(comps, checks, 1))
+                .thenCompose(v -> robotKeys(comps, checks, dispatched, postProcessed, canvasKeys, 1))
                 .thenCompose(v -> temporaryFocus(comps, checks))
                 .whenComplete((v, error) -> {
                     comps.recording = false;
@@ -548,6 +508,100 @@ public class AwtFocusPage implements FeaturePage {
         }).thenAccept(back -> checks.add(back ? Checks.expect("back to the page window : FOCUS_GAINED",
                 "GAINED last ACTIVATION", () -> String.join(", ", comps.log))
                 : Check.info("back to the page window : FOCUS_GAINED", "skipped: the page window was not focused again")));
+    }
+
+    /** Attempts of each Robot sequence : another application may take the foreground at any time. */
+    private static final int ATTEMPTS = 3;
+    private static final String EXPECTED_TABS = "b1 UNKNOWN, t1 TRAVERSAL_FORWARD, l1 TRAVERSAL_FORWARD, "
+            + "t1 TRAVERSAL_BACKWARD";
+
+    /**
+     * Robot Tab, Tab, Shift+Tab from b1, again (at most {@link #ATTEMPTS} times, the window focused again first) while
+     * the traversal is incomplete.
+     */
+    private static CompletionStage<Void> robotTabs(Components comps, java.util.List<Check> checks, int attempt) {
+        // b1 gains the focus by request (UNKNOWN), then by traversal
+        CompletionStage<Void> start = comps.b1.isFocusOwner()
+                ? focus(comps.in1, () -> comps.in1.requestFocusInWindow())
+                : CompletableFuture.completedFuture(null);
+        return start.thenCompose(v -> {
+            comps.log.clear();
+            return focus(comps.b1, () -> comps.b1.requestFocusInWindow());
+        }).thenCompose(v -> Edt.background(() -> {
+            try (RobotSession robot = RobotSession.open()) {
+                if (!robot.ensureFocus(comps.b1)) {
+                    return false;
+                }
+                boolean sent = true;
+                for (int[] keys : new int[][] { { KeyEvent.VK_TAB }, { KeyEvent.VK_TAB },
+                        { KeyEvent.VK_SHIFT, KeyEvent.VK_TAB } }) {
+                    sent &= robot.key(keys);
+                    robot.delay(150);
+                }
+                return sent;
+            }
+        })).thenCompose(sent -> Edt.rounds(3).thenApply(v -> sent)).thenCompose(sent -> {
+            java.util.List<String> gained = gained(comps);
+            if (!String.join(", ", gained).equals(EXPECTED_TABS) && attempt < ATTEMPTS) {
+                return robotTabs(comps, checks, attempt + 1);
+            }
+            checks.add(Check.attempts("Robot Tab, Tab, Shift+Tab", attempt));
+            checks.add(sent ? Checks.expect("Robot Tab, Tab, Shift+Tab from b1", EXPECTED_TABS,
+                    () -> String.join(", ", gained))
+                    : Check.info("Robot Tab, Tab, Shift+Tab from b1", "skipped: not focused"));
+            comps.log.clear();
+            return CompletableFuture.completedFuture(null);
+        });
+    }
+
+    /**
+     * Robot F7 (consumed by the key event dispatcher), F9 (seen by the post processor) and Right (the custom traversal
+     * key of the Canvas), again (at most {@link #ATTEMPTS} times) while an event is missing.
+     */
+    private static CompletionStage<Void> robotKeys(Components comps, java.util.List<Check> checks,
+            java.util.List<String> dispatched, java.util.List<String> postProcessed, java.util.List<String> canvasKeys,
+            int attempt) {
+        KeyboardFocusManager kfm = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+        dispatched.clear();
+        postProcessed.clear();
+        canvasKeys.clear();
+        return focus(comps.canvas, () -> comps.canvas.requestFocusInWindow())
+                .thenCompose(v -> Edt.background(() -> {
+                    try (RobotSession robot = RobotSession.open()) {
+                        if (!robot.ensureFocus(comps.canvas)) {
+                            return false;
+                        }
+                        boolean sent = robot.key(KeyEvent.VK_F7) && robot.key(KeyEvent.VK_F9);
+                        robot.delay(100);
+                        sent &= robot.key(KeyEvent.VK_RIGHT);
+                        robot.delay(200);
+                        return sent;
+                    }
+                }))
+                .thenCompose(sent -> Edt.rounds(3).thenApply(v -> sent))
+                .thenCompose(sent -> {
+                    String keys = "dispatcher " + String.join(" ", dispatched) + " / canvas "
+                            + String.join(" ", canvasKeys);
+                    String post = String.join(" ", postProcessed);
+                    String owner = name(kfm.getFocusOwner());
+                    boolean complete = keys.equals("dispatcher KEY_PRESSED KEY_RELEASED / canvas F9")
+                            && post.equals("KEY_PRESSED KEY_RELEASED") && owner.equals("cycle");
+                    if (!complete && attempt < ATTEMPTS) {
+                        return robotKeys(comps, checks, dispatched, postProcessed, canvasKeys, attempt + 1);
+                    }
+                    checks.add(Check.attempts("Robot F7, F9, Right", attempt));
+                    if (!sent) {
+                        checks.add(Check.info("Robot F7, F9, Right on the Canvas", "skipped: not focused"));
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    checks.add(Checks.expect("KeyEventDispatcher consumes F7 (the canvas never sees it)",
+                            "dispatcher KEY_PRESSED KEY_RELEASED / canvas F9", () -> keys));
+                    checks.add(Checks.expect("KeyEventPostProcessor sees the unconsumed F9", "KEY_PRESSED KEY_RELEASED",
+                            () -> post));
+                    checks.add(Checks.expect("custom forward traversal key (Right) of the Canvas : focus owner", "cycle",
+                            () -> owner));
+                    return CompletableFuture.completedFuture(null);
+                });
     }
 
     private static java.util.List<String> gained(Components comps) {
