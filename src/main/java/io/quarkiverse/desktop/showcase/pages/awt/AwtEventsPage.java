@@ -850,6 +850,10 @@ public class AwtEventsPage implements FeaturePage {
                 global.clear();
                 sequence(robot, target, origin, keys);
                 log = new ArrayList<>(target.log);
+                if (!complete(log, keys) && attempt < ATTEMPTS) {
+                    RobotSession.logRetry("awt-events Robot sequence", attempt, results(log, keys) + " skipped "
+                            + robot.skipped());
+                }
             } while (!complete(log, keys) && attempt < ATTEMPTS);
             checks.add(Check.attempts("Robot mouse and keyboard sequence", attempt));
             if (!robot.skipped().isEmpty()) {

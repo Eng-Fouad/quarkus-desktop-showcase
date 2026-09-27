@@ -46,6 +46,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -381,6 +382,7 @@ public class AwtMixingPage implements FeaturePage {
                 .thenCompose(result -> {
                     boolean lost = !Edt.ownsFocus() || result.getKey().get("reference") != REFERENCE_TEAL;
                     if (lost && attempt < ATTEMPTS) {
+                        RobotSession.logRetry("swing-awt-mixing screen pixels", attempt, "focus or window lost");
                         return Focus.acquire(window).thenCompose(a -> sample(gc, reference, canvas, popup, points, area,
                                 window, checks, attempt + 1));
                     }

@@ -547,6 +547,8 @@ public class AwtMenusPage implements FeaturePage {
                     }
                 }
                 if (file == null) {
+                    RobotSession.logRetry("awt-menus F10, Down", attempt, "the File menu did not open, skipped "
+                            + robot.skipped());
                     closeMenus(robot);
                 }
             }
@@ -575,6 +577,7 @@ public class AwtMenusPage implements FeaturePage {
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
                 if (!activated) {
+                    RobotSession.logRetry("awt-menus F10, Down, Enter", attempt, "no action, skipped " + robot.skipped());
                     closeMenus(robot);
                 }
             }
@@ -596,6 +599,8 @@ public class AwtMenusPage implements FeaturePage {
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
                 if (!activated) {
+                    RobotSession.logRetry("awt-menus F10, Right, Right, Down, Enter", attempt, "no item event, skipped "
+                            + robot.skipped());
                     closeMenus(robot);
                 }
             }

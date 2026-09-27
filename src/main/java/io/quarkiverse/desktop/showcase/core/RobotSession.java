@@ -22,6 +22,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.jboss.logging.Logger;
+
 /**
  * Robot input for the pages that need the focus ({@link FeaturePage#needsFocus()}), from a background thread only
  * (never the EDT : {@link Robot#waitForIdle()} is illegal there, and the waits below would block the events they wait
@@ -40,6 +42,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * delay instead.
  */
 public final class RobotSession implements AutoCloseable {
+
+    private static final Logger LOG = Logger.getLogger(RobotSession.class);
 
     /** The longest wait for the event of a key press or release. */
     public static final long KEY_WAIT_MILLIS = 1000;
@@ -405,6 +409,15 @@ public final class RobotSession implements AutoCloseable {
         if (pointer != null) {
             robot.mouseMove(pointer.x, pointer.y);
         }
+    }
+
+    /**
+     * Logs that an attempt of an action on the live desktop was incomplete (the attempts are recorded with
+     * {@link Check#attempts}) : what was missing, for the analysis of the runs (never in a check value : it depends on
+     * the desktop).
+     */
+    public static void logRetry(String action, int attempt, Object missing) {
+        LOG.infof("%s : attempt %d incomplete (%s ; foreground : %s)", action, attempt, missing, Foreground.describe());
     }
 
     /**

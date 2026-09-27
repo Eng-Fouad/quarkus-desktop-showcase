@@ -35,7 +35,7 @@ import java.util.stream.Stream;
  * the local Maven repository (so the installed snapshot is compared, not the sources).
  * <p>
  * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] [--no-java-beans]
- * [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]
+ * [--version=999-SNAPSHOT] [--quarkus-version=3.40.0] [--repository=local Maven repository of quarkus-desktop]
  * <p>
  * Universe : the classes and resources of the JDK modules java.desktop, java.datatransfer, jdk.unsupported.desktop and
  * jdk.accessibility ({@code jrt:/} of the JDK running the tool) and the packages of these modules. List entries are
@@ -61,12 +61,13 @@ public class MetadataDiff {
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
             "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
             "JNI_RUNTIME_ACCESS_CLASSES", "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES",
-            "RESOURCE_GLOBS", "SERVICE_PROVIDERS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES");
+            "RESOURCE_GLOBS", "SERVICE_PROVIDERS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES", "REFLECTIVE_TYPES",
+            "NEGATIVE_CLASS_LOOKUPS", "METHOD_LOOKUPS");
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
             System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] "
-                    + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0]");
+                    + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0] [--repository=path]");
             System.exit(2);
         }
         Path metadata = Path.of(args[0]);
@@ -77,6 +78,8 @@ public class MetadataDiff {
         boolean javaBeans = true;
         String version = "999-SNAPSHOT";
         String quarkusVersion = quarkusVersion();
+        // the local repository of the quarkus-desktop jars (default : ~/.m2/repository)
+        Path repository = M2;
         for (int i = 1; i < args.length; i++) {
             String arg = args[i];
             if (arg.equals("--awt-only")) {
@@ -87,6 +90,8 @@ public class MetadataDiff {
                 version = arg.substring("--version=".length());
             } else if (arg.startsWith("--quarkus-version=")) {
                 quarkusVersion = arg.substring("--quarkus-version=".length());
+            } else if (arg.startsWith("--repository=")) {
+                repository = Path.of(arg.substring("--repository=".length()));
             } else {
                 platform = arg.toLowerCase(Locale.ROOT).startsWith("win") ? "WINDOWS"
                         : arg.toLowerCase(Locale.ROOT).startsWith("mac") ? "MAC" : "LINUX";
@@ -98,7 +103,7 @@ public class MetadataDiff {
         Registrations reg = new Registrations(universe, javaBeans);
         List<String> sources = new ArrayList<>();
         for (String[] extension : extensions(awtOnly)) {
-            Path jar = M2.resolve("io/quarkiverse/desktop/" + extension[0] + "/" + version + "/" + extension[0] + "-"
+            Path jar = repository.resolve("io/quarkiverse/desktop/" + extension[0] + "/" + version + "/" + extension[0] + "-"
                     + version + ".jar");
             if (!Files.exists(jar)) {
                 sources.add(jar + " : NOT FOUND (install quarkus-desktop)");
@@ -132,6 +137,7 @@ public class MetadataDiff {
         Map<String, String> missingJni = new TreeMap<>();
         Map<String, String> missingReflection = new TreeMap<>();
         Set<String> negativeLookups = new TreeSet<>();
+        Set<String> registeredNegativeLookups = new TreeSet<>();
         Map<String, String> byQuarkusAwt = new TreeMap<>();
         Set<String> serialization = new TreeSet<>();
         Set<String> proxies = new TreeSet<>();
@@ -201,8 +207,13 @@ public class MetadataDiff {
             } else if (samePlatform && !universe.classes.containsKey(type) && missing.equals(List.of("type"))) {
                 // Class.forName of a class that does not exist (BeanInfo, Customizer and PersistenceDelegate searches of
                 // java.beans, class names probed by Nimbus...) : the JDK expects the ClassNotFoundException, which a
-                // native image throws too, unless it is built with --exact-reachability-metadata
-                negativeLookups.add(type);
+                // native image throws too, unless it is built with --exact-reachability-metadata : quarkus-desktop
+                // registers them (NEGATIVE_CLASS_LOOKUPS, and the JavaBeans probes of the classes it registers)
+                if (reg.negativeLookupRegistered(type)) {
+                    registeredNegativeLookups.add(type);
+                } else {
+                    negativeLookups.add(type);
+                }
             } else {
                 missingReflection.put(type, description);
             }
@@ -225,7 +236,7 @@ public class MetadataDiff {
             if (!desktop || glob.endsWith(".class")) {
                 continue;
             }
-            if (reg.resourceCovered(glob) || (glob.endsWith(".properties")
+            if (reg.resourceCovered(glob) || reg.serializedFormProbe(glob) || (glob.endsWith(".properties")
                     && isBundle(glob.substring(0, glob.length() - ".properties".length()).replace('/', '.'), agentBundles))) {
                 continue;
             }
@@ -245,8 +256,10 @@ public class MetadataDiff {
                 + universe.classes.size() + " classes, " + universe.resources.size() + " resources of " + MODULES);
         section("JNI accesses not registered", missingJni);
         section("Reflection accesses not registered", missingReflection);
-        list("Lookups of classes that do not exist in this JDK (expected to fail : only an issue with "
+        list("Lookups of classes that do not exist in this JDK, not registered (expected to fail : only an issue with "
                 + "--exact-reachability-metadata)", negativeLookups);
+        System.out.println("\n## Lookups of classes that do not exist in this JDK, registered by quarkus-desktop "
+                + "(NEGATIVE_CLASS_LOOKUPS, JavaBeans probes of its classes) (" + registeredNegativeLookups.size() + ")");
         list("Resources not included", missingResources);
         list("Resource bundles not included", missingBundles);
         list("Serialization of desktop types (no list kind : the *SERIALIZABLE* constants of the extension code)",
@@ -333,6 +346,10 @@ public class MetadataDiff {
     static final class Registrations {
         final Universe universe;
         final Set<String> reflectiveClasses = new HashSet<>();
+        // classes registered as types (REFLECTIVE_TYPES) and lookups expected to fail (NEGATIVE_CLASS_LOOKUPS)
+        final Set<String> types = new HashSet<>();
+        final Set<String> negativeClassLookups = new HashSet<>();
+        private Set<String> javaBeansProbes;
         final Set<String> reflectiveConstructors = new HashSet<>();
         final Set<String> reflectiveMethods = new HashSet<>();
         final Set<String> reflectiveMethodOwners = new HashSet<>();
@@ -386,6 +403,8 @@ public class MetadataDiff {
                         case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
                         case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
                         case "REFLECTIVE_PUBLIC_MEMBERS" -> publicMembers.add(v);
+                        case "REFLECTIVE_TYPES" -> types.add(v);
+                        case "NEGATIVE_CLASS_LOOKUPS" -> negativeClassLookups.add(v);
                         case "JAVA_BEANS_CLASSES" -> {
                             if (javaBeans) {
                                 publicMembers.add(v);
@@ -400,6 +419,49 @@ public class MetadataDiff {
 
         List<String> platformEntries(String kind) {
             return platformLists.getOrDefault(kind, List.of());
+        }
+
+        /**
+         * The serialized form that Beans.instantiate looks up first ({@code java/awt/Button.ser}) in a package of the
+         * classes registered for the JavaBeans API : quarkus-desktop registers these lookups.
+         */
+        boolean serializedFormProbe(String resource) {
+            if (!resource.endsWith(".ser")) {
+                return false;
+            }
+            String packageName = resource.substring(0, Math.max(0, resource.lastIndexOf('/'))).replace('/', '.');
+            return publicMembers.stream().anyMatch(c -> c.startsWith(packageName + ".")
+                    && c.lastIndexOf('.') == packageName.length());
+        }
+
+        /**
+         * A lookup of a class that does not exist is registered by quarkus-desktop : in a NEGATIVE_CLASS_LOOKUPS list, or
+         * one of the JavaBeans probes that the processor computes for the classes it registers for the JavaBeans API (the
+         * classes with their public members and the REFLECTIVE_TYPES values, with their superclasses) : the same rule as
+         * io.quarkiverse.desktop.awt.deployment.ReachabilityLookups.javaBeansTypes.
+         */
+        boolean negativeLookupRegistered(String type) {
+            if (negativeClassLookups.contains(type)) {
+                return true;
+            }
+            if (javaBeansProbes == null) {
+                javaBeansProbes = new HashSet<>();
+                Set<Class<?>> seen = new HashSet<>();
+                Set<String> classes = new TreeSet<>(publicMembers);
+                types.stream().filter(t -> !t.startsWith("java.lang.invoke.")).forEach(classes::add);
+                for (String name : classes) {
+                    for (Class<?> c = Universe.loadAny(name); c != null && !c.isInterface() && seen.add(c);
+                            c = c.getSuperclass()) {
+                        String n = c.getName();
+                        for (String suffix : List.of("BeanInfo", "Customizer", "PersistenceDelegate", "Editor")) {
+                            javaBeansProbes.add(n + suffix);
+                        }
+                        javaBeansProbes.add("java.beans.MetaData$" + n.replace('.', '_') + "_PersistenceDelegate");
+                        javaBeansProbes.add("com.sun.beans.editors." + n.substring(n.lastIndexOf('.') + 1) + "Editor");
+                    }
+                }
+            }
+            return javaBeansProbes.contains(type);
         }
 
         /**
@@ -423,7 +485,7 @@ public class MetadataDiff {
             boolean constructors = all || in(reflectiveConstructors, type) || in(providers, type);
             boolean methods = all || in(providers, type);
             boolean typeRegistered = constructors || methods || reflectiveMethodOwners.contains(type)
-                    || publicMembers.contains(type);
+                    || publicMembers.contains(type) || types.contains(type);
             if (!typeRegistered) {
                 missing.add("type");
             }
@@ -577,6 +639,16 @@ public class MetadataDiff {
                                             : "no such bundle";
                         }
                         case "REFLECTIVE_METHODS", "JNI_RUNTIME_ACCESS_METHODS" -> universe.checkMethod(v);
+                        // lookups expected to fail : the class must not exist
+                        case "NEGATIVE_CLASS_LOOKUPS" -> universe.classes.containsKey(v) || Universe.loadAny(v) != null
+                                ? "the class exists"
+                                : null;
+                        // the class may not declare the method
+                        case "METHOD_LOOKUPS" -> {
+                            String owner = v.substring(0, v.indexOf('#'));
+                            yield universe.classes.containsKey(owner) || Universe.loadAny(owner) != null ? null
+                                    : "no such class";
+                        }
                         case "JNI_RUNTIME_ACCESS_FIELDS", "REFLECTIVE_FIELDS" -> universe.checkField(v);
                         // entries outside the desktop modules (java.lang.String, byte[]...) are checked in the whole JDK
                         default -> universe.isClassOrPackage(v) || Universe.loadAny(v) != null ? null

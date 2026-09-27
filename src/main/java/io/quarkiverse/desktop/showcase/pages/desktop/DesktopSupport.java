@@ -9,6 +9,7 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Window;
+import java.awt.event.InputEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -174,6 +175,24 @@ public final class DesktopSupport {
             sleep(20);
         }
         return true;
+    }
+
+    /**
+     * Waits until the drag loop ended after the release of the button (slow drops were seen at 150 %). The drag loop of
+     * the operating system may miss the release until the next input (seen in JVM runs : the drag ended when the next
+     * drag pressed the button) : a small move over the drop target, then a click on it (the drop then fails or
+     * succeeds, the caller checks).
+     */
+    public static void finishDrop(RobotSession robot, Point target, java.util.function.BooleanSupplier ended) {
+        if (await(ended, 4000)) {
+            return;
+        }
+        robot.move(new Point(target.x + 1, target.y + 1));
+        if (await(ended, 3000)) {
+            return;
+        }
+        robot.click(InputEvent.BUTTON1_DOWN_MASK);
+        await(ended, 4000);
     }
 
     /**

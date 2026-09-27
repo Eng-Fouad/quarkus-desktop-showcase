@@ -225,6 +225,9 @@ public class RobotPage implements FeaturePage {
             int attempt = 0;
             while (!complete(mouseChecks) && attempt < ATTEMPTS && session.ensureFocus(pad)) {
                 attempt++;
+                if (attempt > 1) {
+                    RobotSession.logRetry("desktop-robot mouse", attempt - 1, failed(mouseChecks));
+                }
                 mouseChecks = new ArrayList<>();
                 mouseDone = mouse(mouseChecks, session, pad, padOrigin);
             }
@@ -238,6 +241,9 @@ public class RobotPage implements FeaturePage {
                 attempt = 0;
                 while (!complete(keyChecks) && attempt < ATTEMPTS && session.ensureFocus(field)) {
                     attempt++;
+                    if (attempt > 1) {
+                        RobotSession.logRetry("desktop-robot keyboard", attempt - 1, failed(keyChecks));
+                    }
                     keyChecks = new ArrayList<>();
                     keyboard(keyChecks, session, field, keyLog);
                 }
@@ -259,6 +265,11 @@ public class RobotPage implements FeaturePage {
     /**
      * {@code true} when {@code checks} is not empty, has no failed check and no skipped input.
      */
+    private static List<String> failed(List<Check> checks) {
+        return checks.stream().filter(c -> Boolean.FALSE.equals(c.ok()) || c.value().startsWith("skipped"))
+                .map(c -> c.name() + " = " + c.value()).toList();
+    }
+
     private static boolean complete(List<Check> checks) {
         return !checks.isEmpty() && checks.stream().noneMatch(c -> Boolean.FALSE.equals(c.ok())
                 || c.value().startsWith("skipped"));

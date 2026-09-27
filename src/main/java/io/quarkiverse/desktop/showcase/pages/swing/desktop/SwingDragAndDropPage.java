@@ -445,7 +445,8 @@ public class SwingDragAndDropPage implements FeaturePage {
             robot.glide(start, plan.to(), 24, 15);
             DesktopSupport.sleep(250);
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
-            DesktopSupport.await(() -> log.exported, 4000);
+            // the drag loop of the operating system may miss the release of the button until the next input
+            DesktopSupport.finishDrop(robot, plan.to(), () -> log.exported);
             outcome = null;
             if (log.imported) {
                 break;

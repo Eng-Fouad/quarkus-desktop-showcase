@@ -83,6 +83,7 @@ import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -782,6 +783,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
         Typing outcome = typeOnce(u);
         int attempt = 1;
         while (!outcome.complete() && attempt < ATTEMPTS) {
+            RobotSession.logRetry("swing-keybindings Robot typing", attempt, outcome.reason());
             attempt++;
             JTextField field = u.robotField;
             java.awt.Window window = onEdt(() -> SwingUtilities.getWindowAncestor(field));
