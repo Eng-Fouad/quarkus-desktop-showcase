@@ -267,13 +267,22 @@ public class SnapshotRunner {
                         }
                     }
                     List<String> extraFiles = new ArrayList<>();
+                    List<String> captureFiles = new ArrayList<>();
                     images.forEach((name, image) -> {
                         String file = page.id() + "--" + name + ".png";
                         writeImage(image, out.resolve(file));
                         extraFiles.add(file);
+                        if (RobotSession.isCapture(image)) {
+                            captureFiles.add(file);
+                        }
                     });
                     Collections.sort(extraFiles);
                     result.put("extras", extraFiles);
+                    if (!captureFiles.isEmpty()) {
+                        // raw Robot screen captures (the comparison tolerates the color profile of macOS for them)
+                        Collections.sort(captureFiles);
+                        result.put("captures", captureFiles);
+                    }
                     List<Map<String, Object>> checks = new ArrayList<>();
                     for (Check check : content == null ? List.<Check> of() : Checks.collect(content)) {
                         Map<String, Object> c = new LinkedHashMap<>();

@@ -15,11 +15,13 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -376,6 +378,10 @@ public final class RobotSession implements AutoCloseable {
 
     // ---------------------------------------------------------------------------------------------------- screen
 
+    /** The images of {@link #capture} (identity, weak) : see {@link #isCapture}. */
+    private static final Set<BufferedImage> CAPTURES = Collections.synchronizedSet(Collections.newSetFromMap(
+            new WeakHashMap<>()));
+
     /**
      * The difference per channel that {@link #sameColor} accepts between a screen pixel read by Robot and the color the
      * application painted there : 0, except on macOS, where Robot reads the screen through the color profile of the
@@ -442,7 +448,19 @@ public final class RobotSession implements AutoCloseable {
     }
 
     public BufferedImage capture(Rectangle screen) {
-        return robot.createScreenCapture(screen);
+        BufferedImage image = robot.createScreenCapture(screen);
+        CAPTURES.add(image);
+        return image;
+    }
+
+    /**
+     * Whether {@code image} is a screen capture of {@link #capture}, as captured (not a processed copy) : its colors come
+     * from the screen, through the color profile of the display on macOS, one or two levels apart from one run to the
+     * next. {@link SnapshotRunner} lists such snapshots in the report ({@code captures}), and the comparison tool
+     * tolerates {@link #COLOR_TOLERANCE} for them on macOS.
+     */
+    public static boolean isCapture(BufferedImage image) {
+        return CAPTURES.contains(image);
     }
 
     /**

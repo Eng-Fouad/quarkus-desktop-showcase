@@ -32,7 +32,9 @@ import javax.imageio.ImageIO;
  * <p>
  * Images whose differences are at most {@link #NOISE_MAX_DELTA} per channel on less than {@link #NOISE_MAX_RATIO} of
  * the pixels are reported as NOISE : the same variations exist between two JVM runs using different execution modes
- * (e.g. JIT vs -Xint), they come from floating point evaluation, not from the native image.
+ * (e.g. JIT vs -Xint), they come from floating point evaluation, not from the native image. On macOS, the raw Robot
+ * screen captures that both reports list ({@code captures} of a page) are NOISE up to {@link #MAC_CAPTURE_MAX_DELTA} per
+ * channel : their colors come through the color profile of the display, a level or more apart from one run to the next.
  * <p>
  * The images and check values of a page flagged {@code runtimeDependent} in the reports (a page showing where the JVM
  * and a native image legitimately differ) are reported as EXPECTED when they differ : they are not mismatches, but
@@ -45,6 +47,8 @@ public class Compare {
 
     static final int NOISE_MAX_DELTA = 2;
     static final double NOISE_MAX_RATIO = 0.005;
+    /** The color tolerance of the Robot pages on macOS (RobotSession.COLOR_TOLERANCE). */
+    static final int MAC_CAPTURE_MAX_DELTA = 6;
     static final List<String> ENV_INFO_KEYS = List.of("runtime", "javaVendorVersion", "javaHome", "dpiaware", "uiScale",
             "javaAwtHeadless", "mainThreadParked", "property.sun.java.launcher");
     static final List<String> NOT_ENV_KEYS = List.of("pages", "uncaughtOutsidePages");
@@ -81,6 +85,15 @@ public class Compare {
             });
         }
 
+        // the raw Robot screen captures of both runs, on macOS
+        Set<String> macCaptures = new TreeSet<>();
+        if (String.valueOf(reportA.get("os")).startsWith("Mac") && String.valueOf(reportB.get("os")).startsWith("Mac")) {
+            Set<String> capturesB = new TreeSet<>();
+            pagesB.values().forEach(page -> capturesB.addAll(names(page.get("captures"))));
+            pagesA.values().forEach(page -> names(page.get("captures")).stream().filter(capturesB::contains)
+                    .forEach(macCaptures::add));
+        }
+
         // Images
         TreeSet<String> names = new TreeSet<>();
         names.addAll(pngs(a));
@@ -88,6 +101,10 @@ public class Compare {
         List<ImageResult> images = new ArrayList<>();
         for (String name : names) {
             ImageResult r = compareImage(a.resolve(name), b.resolve(name), out, name, tolerance);
+            if (r.status.equals("DIFFERENT") && macCaptures.contains(name) && r.maxDelta <= MAC_CAPTURE_MAX_DELTA
+                    && r.differing < NOISE_MAX_RATIO * r.total) {
+                r = new ImageResult(r.file, "NOISE", r.differing, r.total, r.maxDelta, r.diffFile);
+            }
             if (!r.status.equals("IDENTICAL") && !r.status.equals("NOISE") && runtimeDependent.contains(pageId(name))) {
                 r = new ImageResult(r.file, "EXPECTED", r.differing, r.total, r.maxDelta, r.diffFile);
             } else if (!r.status.equals("IDENTICAL") && !r.status.equals("NOISE") && name.endsWith("--screen.png")) {
@@ -277,6 +294,13 @@ public class Compare {
     }
 
     @SuppressWarnings("unchecked")
+    /**
+     * The strings of a JSON array value of a report, empty when absent.
+     */
+    static List<String> names(Object value) {
+        return value instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of();
+    }
+
     static Map<String, Object> readReport(Path dir) throws IOException {
         Path file = dir.resolve("report.json");
         if (!Files.exists(file)) {
