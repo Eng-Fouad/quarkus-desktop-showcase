@@ -201,6 +201,9 @@ docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2
 # awt-only variant
 docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
     java tools/Cycle.java linux-awt --awt-only --trace
+# exact reachability metadata : no "run.log lines about missing metadata" expected after the native snapshots
+docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
+    java tools/Cycle.java linux-exact --exact
 ```
 
 The builds write `target/` and `comparison/` of the mounted directory (on Docker Desktop, a copy of the sources in a
