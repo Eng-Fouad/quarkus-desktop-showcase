@@ -32,10 +32,17 @@ import java.util.stream.Stream;
  * platform : the common lists and the lists of that platform of
  * {@code io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources} and
  * {@code io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources}, read from the deployment jars installed in
- * the local Maven repository (so the installed snapshot is compared, not the sources).
+ * the local Maven repository (so the installed snapshot is compared, not the sources). What the application registers
+ * itself (its {@code reachability-metadata.json}, {@link #APP_METADATA} by default) is subtracted and counted apart.
  * <p>
  * usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] [--no-java-beans]
  * [--version=999-SNAPSHOT] [--quarkus-version=3.40.0] [--repository=local Maven repository of quarkus-desktop]
+ * [--app-metadata=reachability-metadata.json of the application]
+ * <p>
+ * Run it on the platform of the trace : the universe is the JDK running the tool, so on another platform the classes
+ * and resources that do not exist in this JDK cannot be told apart from those of the other platform (only the lookups
+ * that quarkus-desktop registers by name are recognized, the other ones are reported as not registered or not
+ * included), and the platform lists are not checked for stale entries.
  * <p>
  * Universe : the classes and resources of the JDK modules java.desktop, java.datatransfer, jdk.unsupported.desktop and
  * jdk.accessibility ({@code jrt:/} of the JDK running the tool) and the packages of these modules. List entries are
@@ -53,6 +60,9 @@ import java.util.stream.Stream;
 public class MetadataDiff {
 
     static final Path M2 = Path.of(System.getProperty("user.home"), ".m2", "repository");
+    /** The reachability metadata of the showcase itself (relative to the root of the repository). */
+    static final Path APP_METADATA = Path.of("src/main/resources/META-INF/native-image/io.quarkiverse.desktop.showcase/"
+            + "quarkus-desktop-showcase/reachability-metadata.json");
     static final List<String> MODULES = List.of("java.desktop", "java.datatransfer", "jdk.unsupported.desktop",
             "jdk.accessibility");
     /** Packages of the desktop modules on every platform (for traces recorded on another operating system). */
@@ -61,6 +71,8 @@ public class MetadataDiff {
             "com.sun.media.sound", "java.beans", "com.sun.beans", "sun.datatransfer", "javax.accessibility",
             "com.sun.java.accessibility", "com.sun.accessibility", "jdk.swing.interop", "java.applet", "sun.lwawt",
             "com.apple.eawt", "com.apple.laf");
+    /** A method entry of the lists : {@code fqcn#name(paramType,...)}. */
+    static final Pattern METHOD_ENTRY = Pattern.compile("([^#]+)#([^(]+)\\((.*)\\)");
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
             "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
             "JNI_RUNTIME_ACCESS_CLASSES", "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES",
@@ -70,7 +82,8 @@ public class MetadataDiff {
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
             System.err.println("usage: java tools/MetadataDiff.java reachability-metadata.json [windows|linux|mac] [--awt-only] "
-                    + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0] [--repository=path]");
+                    + "[--no-java-beans] [--version=999-SNAPSHOT] [--quarkus-version=3.40.0] [--repository=path] "
+                    + "[--app-metadata=path]");
             System.exit(2);
         }
         Path metadata = Path.of(args[0]);
@@ -83,6 +96,8 @@ public class MetadataDiff {
         String quarkusVersion = quarkusVersion();
         // the local repository of the quarkus-desktop jars (default : ~/.m2/repository)
         Path repository = M2;
+        // what the application registers itself
+        Path appMetadata = APP_METADATA;
         for (int i = 1; i < args.length; i++) {
             String arg = args[i];
             if (arg.equals("--awt-only")) {
@@ -95,6 +110,8 @@ public class MetadataDiff {
                 quarkusVersion = arg.substring("--quarkus-version=".length());
             } else if (arg.startsWith("--repository=")) {
                 repository = Path.of(arg.substring("--repository=".length()));
+            } else if (arg.startsWith("--app-metadata=")) {
+                appMetadata = Path.of(arg.substring("--app-metadata=".length()));
             } else {
                 platform = arg.toLowerCase(Locale.ROOT).startsWith("win") ? "WINDOWS"
                         : arg.toLowerCase(Locale.ROOT).startsWith("mac") ? "MAC" : "LINUX";
@@ -139,6 +156,14 @@ public class MetadataDiff {
             sources.add(awtDeployment + " : NOT FOUND");
         }
 
+        AppRegistrations app = AppRegistrations.load(appMetadata);
+        sources.add(appMetadata + (app == null ? " : NOT FOUND (the registrations of the application are not subtracted)"
+                : " : " + app.types.size() + " types, " + app.members.size() + " members, " + app.globs.size()
+                        + " resource globs of the application"));
+        if (app == null) {
+            app = new AppRegistrations();
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> md = (Map<String, Object>) new Compare.JsonParser(Files.readString(metadata)).parse();
 
@@ -146,6 +171,7 @@ public class MetadataDiff {
         Map<String, String> missingReflection = new TreeMap<>();
         Set<String> negativeLookups = new TreeSet<>();
         Set<String> registeredNegativeLookups = new TreeSet<>();
+        Set<String> registeredByApp = new TreeSet<>();
         Map<String, String> byQuarkusAwt = new TreeMap<>();
         Set<String> serialization = new TreeSet<>();
         Set<String> proxies = new TreeSet<>();
@@ -205,6 +231,18 @@ public class MetadataDiff {
             if (missing.isEmpty() || (!jni && missing.equals(List.of("type")) && isBundle(type, agentBundles))) {
                 continue;
             }
+            if (!jni) {
+                // registered by the application (its own beans probed in java.beans, the JDK members it reads)
+                List<String> byApp = app.covered(type, missing);
+                if (!byApp.isEmpty()) {
+                    missing = new ArrayList<>(missing);
+                    missing.removeAll(byApp);
+                    if (missing.isEmpty()) {
+                        registeredByApp.add(type + "  " + String.join(" ", byApp));
+                        continue;
+                    }
+                }
+            }
             String description = String.join(" ", missing);
             // exact class names only : the packages that quarkus-awt names are run time initialization entries, not
             // registrations (a package prefix match hid e.g. the JNI callbacks of sun.awt.dnd.SunDropTargetContextPeer)
@@ -212,16 +250,17 @@ public class MetadataDiff {
                 byQuarkusAwt.put((jni ? "JNI " : "reflection ") + type, description);
             } else if (jni) {
                 missingJni.put(type, description);
-            } else if (samePlatform && !universe.classes.containsKey(type) && missing.equals(List.of("type"))) {
+            } else if (!universe.classes.containsKey(type) && missing.equals(List.of("type"))
+                    && reg.negativeLookupRegistered(type)) {
                 // Class.forName of a class that does not exist (BeanInfo, Customizer and PersistenceDelegate searches of
                 // java.beans, class names probed by Nimbus...) : the JDK expects the ClassNotFoundException, which a
                 // native image throws too, unless it is built with --exact-reachability-metadata : quarkus-desktop
-                // registers them (NEGATIVE_CLASS_LOOKUPS, and the JavaBeans probes of the classes it registers)
-                if (reg.negativeLookupRegistered(type)) {
-                    registeredNegativeLookups.add(type);
-                } else {
-                    negativeLookups.add(type);
-                }
+                // registers them (NEGATIVE_CLASS_LOOKUPS, and the JavaBeans probes of the classes it registers). These
+                // names do not depend on the platform : recognized on any platform
+                registeredNegativeLookups.add(type);
+            } else if (samePlatform && !universe.classes.containsKey(type) && missing.equals(List.of("type"))) {
+                // on the platform of the trace only : on another one, the class may exist there
+                negativeLookups.add(type);
             } else {
                 missingReflection.put(type, description);
             }
@@ -249,13 +288,18 @@ public class MetadataDiff {
                     && isBundle(glob.substring(0, glob.length() - ".properties".length()).replace('/', '.'), agentBundles))) {
                 continue;
             }
+            if (app.resourceCovered(glob)) {
+                registeredByApp.add("resource " + glob);
+                continue;
+            }
             if (quarkusAwtGlobs.stream().anyMatch(p -> p.matcher(glob).matches())) {
                 byQuarkusAwt.put("resource " + glob, "");
                 continue;
             }
             if (samePlatform && module != null && !universe.resources.contains(glob)) {
                 // a resource of a desktop module that the JDK looks for but does not have (Beans.instantiate probes
-                // java/awt/Button.ser, SwingUtilities2.makeIcon the icons of every look and feel class up to Basic)
+                // java/awt/Button.ser, SwingUtilities2.makeIcon the icons of every look and feel class up to Basic) ;
+                // on the platform of the trace only : on another one, the resource may exist there
                 absentResources.add(glob + " (module " + module + ")");
                 continue;
             }
@@ -276,6 +320,8 @@ public class MetadataDiff {
         System.out.println("\n## Lookups of classes that do not exist in this JDK, registered by quarkus-desktop "
                 + "(NEGATIVE_CLASS_LOOKUPS, JavaBeans probes of its classes, ABSENT_RESOURCE_BUNDLES lookups) ("
                 + registeredNegativeLookups.size() + ")");
+        list("Registered by the application (its reachability-metadata.json : the lookups of its own beans, the JDK "
+                + "members it reads by reflection)", registeredByApp);
         list("Resources not included", missingResources);
         list("Lookups of resources that do not exist in this JDK (expected to fail, a native executable finds none either : "
                 + "only an issue with --exact-reachability-metadata)", absentResources);
@@ -367,9 +413,12 @@ public class MetadataDiff {
         final Set<String> reflectiveClasses = new HashSet<>();
         // classes registered as types (REFLECTIVE_TYPES) and lookups expected to fail (NEGATIVE_CLASS_LOOKUPS)
         final Set<String> types = new HashSet<>();
+        // the REFLECTIVE_TYPES values of the AWT extension (whose processor registers the .ser lookups)
+        final Set<String> awtTypes = new HashSet<>();
         final Set<String> negativeClassLookups = new HashSet<>();
         private Set<String> javaBeansProbes;
         private Set<String> javaBeansClasses;
+        private Set<String> serializedFormClasses;
         final Set<String> reflectiveConstructors = new HashSet<>();
         final Set<String> reflectiveMethods = new HashSet<>();
         final Set<String> reflectiveMethodOwners = new HashSet<>();
@@ -425,7 +474,12 @@ public class MetadataDiff {
                         case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
                         case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
                         case "REFLECTIVE_PUBLIC_MEMBERS" -> publicMembers.add(v);
-                        case "REFLECTIVE_TYPES" -> types.add(v);
+                        case "REFLECTIVE_TYPES" -> {
+                            types.add(v);
+                            if (source.equals("awt")) {
+                                awtTypes.add(v);
+                            }
+                        }
                         case "NEGATIVE_CLASS_LOOKUPS" -> negativeClassLookups.add(v);
                         case "JAVA_BEANS_CLASSES" -> {
                             if (javaBeans) {
@@ -457,15 +511,21 @@ public class MetadataDiff {
 
         /**
          * The serialized form that Beans.instantiate looks up first ({@code java/awt/Button.ser}) in a package of the
-         * classes registered for the JavaBeans API ({@link #javaBeansClasses()}) : quarkus-desktop registers these
-         * lookups (ReachabilityLookups.javaBeansSerializedForms).
+         * classes that the AWT extension registers the JavaBeans lookups for : quarkus-desktop registers these lookups
+         * (ReachabilityLookups.javaBeansSerializedForms, called by DesktopAwtProcessor.reachabilityLookups for the
+         * classes registered with their public members, of both extensions, and the REFLECTIVE_TYPES values of the AWT
+         * extension ; DesktopSwingProcessor registers no serialized forms for its REFLECTIVE_TYPES).
          */
         boolean serializedFormProbe(String resource) {
             if (!resource.endsWith(".ser")) {
                 return false;
             }
+            if (serializedFormClasses == null) {
+                serializedFormClasses = new TreeSet<>(publicMembers);
+                awtTypes.stream().filter(t -> !t.startsWith("java.lang.invoke.")).forEach(serializedFormClasses::add);
+            }
             String packageName = resource.substring(0, Math.max(0, resource.lastIndexOf('/'))).replace('/', '.');
-            return javaBeansClasses().stream().anyMatch(c -> c.startsWith(packageName + ".")
+            return serializedFormClasses.stream().anyMatch(c -> c.startsWith(packageName + ".")
                     && c.lastIndexOf('.') == packageName.length());
         }
 
@@ -688,6 +748,9 @@ public class MetadataDiff {
                                 : null;
                         // the class may not declare the method
                         case "METHOD_LOOKUPS" -> {
+                            if (!METHOD_ENTRY.matcher(v).matches()) {
+                                yield "not fqcn#name(paramType,...)";
+                            }
                             String owner = v.substring(0, v.indexOf('#'));
                             yield universe.classes.containsKey(owner) || Universe.loadAny(owner) != null ? null
                                     : "no such class";
@@ -703,6 +766,75 @@ public class MetadataDiff {
                 }
             });
             return stale;
+        }
+    }
+
+    /**
+     * What the application registers itself in its {@code reachability-metadata.json} : types with their methods and
+     * fields (the reflection section, no JNI), and resource globs.
+     */
+    static final class AppRegistrations {
+        final Set<String> types = new HashSet<>();
+        // "fqcn#name(paramType,...)" methods and "fqcn#field" fields
+        final Set<String> members = new HashSet<>();
+        final List<Pattern> globs = new ArrayList<>();
+
+        /**
+         * The registrations of the metadata file {@code path}, {@code null} when it does not exist.
+         */
+        static AppRegistrations load(Path path) throws IOException {
+            if (!Files.exists(path)) {
+                return null;
+            }
+            AppRegistrations app = new AppRegistrations();
+            Map<String, Object> md = map(new Compare.JsonParser(Files.readString(path)).parse());
+            for (Object o : (List<?>) md.getOrDefault("reflection", List.of())) {
+                Map<String, Object> entry = map(o);
+                if (!(entry.get("type") instanceof String type)) {
+                    continue;
+                }
+                app.types.add(type);
+                for (Map<String, Object> m : list(entry.get("methods"))) {
+                    app.members.add(type + "#" + m.get("name") + "(" + String.join(",", strings(m.get("parameterTypes")))
+                            + ")");
+                }
+                for (Map<String, Object> f : list(entry.get("fields"))) {
+                    app.members.add(type + "#" + f.get("name"));
+                }
+            }
+            for (Object o : (List<?>) md.getOrDefault("resources", List.of())) {
+                Object glob = map(o).get("glob");
+                if (glob != null) {
+                    app.globs.add(globToRegex(String.valueOf(glob)));
+                }
+            }
+            return app;
+        }
+
+        /**
+         * The items of {@code missing} ({@link Registrations#missingReflection} : {@code type},
+         * {@code method #name(paramType,...)}, {@code field #name}...) that the application registers for {@code type}.
+         */
+        List<String> covered(String type, List<String> missing) {
+            List<String> covered = new ArrayList<>();
+            for (String item : missing) {
+                boolean registered;
+                if (item.equals("type")) {
+                    registered = types.contains(type);
+                } else if (item.startsWith("method #") || item.startsWith("field #")) {
+                    registered = members.contains(type + item.substring(item.indexOf('#')));
+                } else {
+                    registered = false;
+                }
+                if (registered) {
+                    covered.add(item);
+                }
+            }
+            return covered;
+        }
+
+        boolean resourceCovered(String path) {
+            return globs.stream().anyMatch(p -> p.matcher(path).matches());
         }
     }
 
@@ -754,7 +886,7 @@ public class MetadataDiff {
         }
 
         String checkMethod(String entry) {
-            Matcher m = Pattern.compile("([^#]+)#([^(]+)\\((.*)\\)").matcher(entry);
+            Matcher m = METHOD_ENTRY.matcher(entry);
             if (!m.matches()) {
                 return "not fqcn#name(paramType,...)";
             }

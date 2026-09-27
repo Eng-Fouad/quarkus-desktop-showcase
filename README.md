@@ -117,6 +117,18 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
 - registers the JDK methods that its JavaBeans pages call by name (`Expression(Integer.class, "parseInt")`,
   `(Math.class, "max")`, `<object class="java.lang.Integer" method="valueOf">` in `decoder-elements.xml`), in the same
   `reachability-metadata.json`, and one proxy class per listener interface of `EventHandler` (`@RegisterForProxy`);
+- registers, in the same `reachability-metadata.json`, the Foreign Function and Memory downcalls of `core.Foreground`
+  (the Windows foreground check; native access is enabled with the `Enable-Native-Access` manifest attribute of the run
+  jar and `--enable-native-access=ALL-UNNAMED` for native builds, in `application.properties`, repeated in the `mac`
+  profile of `pom.xml`), the JDK internals that the macOS capture of the AWT components reads by reflection
+  (`java.awt.Component#peer`, `sun.lwawt.LWComponentPeer#getDelegate()`, with the `add-opens` of the `mac` profile),
+  and the lookups that an `--exact-reachability-metadata` build needs for its own classes and resources: the types of
+  its Synth painter and JavaBeans, the JavaBeans probes of its beans that do not exist (`BeanInfo`, `Customizer`,
+  `PersistenceDelegate`, `Editor`, `java.beans.MetaData$..._PersistenceDelegate`) and the serialized forms that
+  `Beans.instantiate` looks for (`.../pages/beans/*.ser`), the absent names its pages look up on purpose
+  (`no.such.Bean`, `no.such.Type`, `no/such/*.ser`, missing images), the configuration files that Quarkus looks for,
+  and the `provider()` method of the JDK locale data provider. These were taken from a Windows exact-mode trace: Linux
+  and macOS exact-mode runs may need more;
 - enables the JavaBeans registration of the JDK Swing classes (`quarkus.desktop.swing.java-beans.jdk-classes=true`; the
   AWT one, `quarkus.desktop.awt.java-beans.jdk-classes`, is enabled by default): the beans pages introspect, encode and
   decode AWT and Swing components;
@@ -129,10 +141,11 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   GraalVM tracing agent, then `tools/MetadataDiff.java` lists the JNI, reflection, resource, bundle, serialization and
   proxy accesses of the JDK desktop modules that quarkus-desktop does not register for the current platform:
   `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux|mac] [--awt-only]
-  [--no-java-beans] [--repository=path]`.
+  [--no-java-beans] [--repository=path] [--app-metadata=path]`, from the root of the repository.
   It reads the `static String[]` lists of `io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources` and
   `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2` (or
-  in the local Maven repository given with `--repository`, e.g. a copy of the Docker volume of the Linux cycle),
+  in another local Maven repository given with `--repository`, e.g. one where a branch of quarkus-desktop was
+  installed with `-Dmaven.repo.local`),
   understands package entries, `fqcn#member` entries and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
   `java-beans.jdk-classes` properties), the lists of `--exact-reachability-metadata` builds (`REFLECTIVE_TYPES`,
@@ -141,7 +154,12 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   exist in the JDK) and the lookups of classes and resources that do not exist in the JDK (expected to fail, only an
   issue with `--exact-reachability-metadata`; the class lookups that quarkus-desktop registers for it, the
   `NEGATIVE_CLASS_LOOKUPS`, the JavaBeans probes of its classes and the lookups of the absent bundles, are only
-  counted).
+  counted). What the showcase registers itself (its `reachability-metadata.json`, or the one given with
+  `--app-metadata`) is subtracted and listed apart. Run it on the platform of the trace (the Linux cycle runs it in the
+  container, where `~/.m2` is the Docker volume): the JDK running the tool is the universe, so on another platform a
+  class or resource missing from that JDK may exist on the platform of the trace. The lookups that quarkus-desktop
+  registers by name are recognized on any platform, but the other lookups of absent classes and resources are then
+  listed as not registered or not included, and the stale entries of the platform lists are not checked.
 - `java tools/ClinitAudit.java [windows|linux|mac] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
