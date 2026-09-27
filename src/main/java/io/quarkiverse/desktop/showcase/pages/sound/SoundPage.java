@@ -419,6 +419,11 @@ public class SoundPage implements FeaturePage {
             } finally {
                 clip.close();
             }
+            // Java Sound delivers the line events on its event dispatcher thread : wait for the event of close()
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            while (!events.contains(LineEvent.Type.CLOSE.toString()) && System.nanoTime() - deadline < 0) {
+                Thread.sleep(20);
+            }
             return result + ", events " + String.join(" ", events.stream().filter(e -> !e.equals(
                     LineEvent.Type.START.toString()) && !e.equals(LineEvent.Type.STOP.toString())).toList());
         }));
