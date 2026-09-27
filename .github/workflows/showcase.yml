@@ -1,12 +1,14 @@
 name: Showcase
 
-# The showcase against quarkus-desktop main : on every change of the showcase, and every night (the builder image and
-# quarkus-desktop move without the showcase). Manually : another quarkus-desktop commit, other runners, the experimental
-# Windows and macOS jobs.
+# The showcase against quarkus-desktop main on five platforms (see cycle.yml) : on every change of the showcase, and
+# every night with the nightly variants too (the builder image, the runner images and quarkus-desktop move without the
+# showcase). Manually : another quarkus-desktop commit, some of the platforms, the nightly variants.
 on:
   push:
     branches:
       - "main"
+      # TEMPORARY : the test branch of the five platforms (removed before the merge)
+      - "ci-platforms"
     paths-ignore:
       - '.gitignore'
       - 'LICENSE'
@@ -24,15 +26,11 @@ on:
       desktop-ref:
         description: quarkus-desktop branch, tag or commit
         default: main
-      runners:
-        description: Linux runners (JSON array)
-        default: '["ubuntu-24.04-arm"]'
-      windows:
-        description: Experimental Windows cycle
-        type: boolean
-        default: false
-      macos:
-        description: Experimental macOS JVM runs
+      platforms:
+        description: Platforms, a JSON array (Linux-arm64, Linux-x64, Windows-x64, Windows-arm64, macOS-arm64) ; empty for all five
+        default: ''
+      nightly:
+        description: Also the nightly variants
         type: boolean
         default: false
 
@@ -51,6 +49,5 @@ jobs:
       showcase-repository: ${{ github.repository }}
       showcase-ref: ${{ github.sha }}
       desktop-ref: ${{ inputs.desktop-ref || 'main' }}
-      runners: ${{ inputs.runners || '["ubuntu-24.04-arm"]' }}
-      windows: ${{ github.event_name == 'workflow_dispatch' && inputs.windows }}
-      macos: ${{ github.event_name == 'workflow_dispatch' && inputs.macos }}
+      platforms: ${{ inputs.platforms || '' }}
+      nightly: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly) }}
