@@ -269,11 +269,13 @@ public class DesktopServicesPage implements FeaturePage {
             desktop.openHelpViewer();
             return "opened";
         }));
-        checks.add(expectThrowsIf(desktop, Desktop.Action.APP_MENU_BAR, "setDefaultMenuBar(null)",
-                UnsupportedOperationException.class, () -> {
-                    desktop.setDefaultMenuBar(null);
-                    return "reset";
-                }));
+        // the menu bar shown when no frame is active (macOS) : null clears it, CDesktopPeer.setDefaultMenuBar ->
+        // Application.setDefaultMenuBar -> _AppMenuBarHandler.installDefaultMenuBar(null) removes the current default
+        // menu bar (nativeSetDefaultMenuBar(0)) and returns
+        checks.add(handler(desktop, Desktop.Action.APP_MENU_BAR, "setDefaultMenuBar(null)", () -> {
+            desktop.setDefaultMenuBar(null);
+            return "reset";
+        }));
         checks.add(Checks.expect("add/removeAppEventListener (session, sleep, foreground)", "added and removed", () -> {
             Listener listener = new Listener();
             desktop.addAppEventListener(listener);
