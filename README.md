@@ -131,7 +131,9 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2`,
   understands package entries, `fqcn#member` entries and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
-  `java-beans.jdk-classes` properties), and also lists stale entries (names that do not exist in the JDK).
+  `java-beans.jdk-classes` properties), the constants of the extension code (`*SERIALIZABLE*` classes, and the
+  `ABSENT_RESOURCE_BUNDLES` that the JDK looks up but does not have), and also lists stale entries (names that do not
+  exist in the JDK) and the lookups of classes and resources that do not exist in the JDK (expected to fail).
 - `java tools/ClinitAudit.java [windows|linux|mac] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
@@ -139,15 +141,46 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
 
 ## Linux in Docker
 
-`docker/linux/Dockerfile` provides a Linux environment (GraalVM CE for JDK 25, a virtual X server, the X11, fontconfig,
-CUPS, ALSA and GTK runtime libraries, fonts):
+`docker/linux/Dockerfile` provides a Linux environment: GraalVM CE for JDK 25 (the GraalVM of the Quarkus builder
+image), a virtual X server (`Xvfb`, 3840x2160 at 96 DPI) with a window manager (`openbox`, without key and mouse
+bindings: `docker/linux/openbox-rc.xml`) and a compositing manager (`xcompmgr`), the X11, fontconfig, CUPS (library only: no printer), ALSA (null device) and GTK runtime libraries, fixed
+fonts (DejaVu, Liberation, Noto, Noto CJK and Noto Color Emoji), `xclip` (the foreign clipboard application of
+`dt-clipboard`), and pins what changes the rendering: `GTK_THEME=Adwaita`, `LANG=C.UTF-8`, `TZ=UTC` (the snapshot tool
+adds `-Duser.language=en -Duser.country=US`). The window manager keeps the always-on-top windows of the pages above the
+others and activates the windows they bring to the front, as on a Linux desktop; the compositing manager renders the
+translucent windows (AWT reports window opacity as supported whenever the window manager supports it).
+`SHOWCASE_WM=none` runs a bare X server, `SHOWCASE_COMPOSITOR=none` leaves the compositing manager out.
+
+The container has a Maven repository of its own (a Docker volume): quarkus-desktop is built and installed there first,
+with its tests (the native integration tests run on the virtual display).
 
 ```bash
+# in the showcase directory, with a quarkus-desktop clone next to it (../quarkus-desktop)
 docker build -t quarkus-desktop-showcase-linux docker/linux
-docker run --rm --init -v "$PWD":/showcase -v "$HOME/.m2":/root/.m2 quarkus-desktop-showcase-linux java tools/Cycle.java linux
+docker volume create quarkus-desktop-linux-m2
+docker run --rm --init -v "$PWD/../quarkus-desktop":/quarkus-desktop -w /quarkus-desktop \
+    -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
+    ./mvnw -B install -Dnative -Dquarkus.native.native-image-xmx=8g
+# default variant : JVM, JVM under the tracing agent (+ MetadataDiff), native build, native run, comparison
+docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
+    java tools/Cycle.java linux --trace
+# a second JVM run (determinism : MATCH, every image identical)
+docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
+    sh -c 'java tools/Snapshot.java jvm jvm-linux-2 && java tools/Compare.java comparison/jvm-linux comparison/jvm-linux-2 comparison/diff-jvm-linux'
+# awt-only variant
+docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2 quarkus-desktop-showcase-linux \
+    java tools/Cycle.java linux-awt --awt-only --trace
 ```
 
-Compare Linux runs with Linux runs only (another GraalVM release line, other fonts).
+The builds write `target/` and `comparison/` of the mounted directory (on Docker Desktop, a copy of the sources in a
+Docker volume builds faster). Expected results: `MATCH`, every page identical except the `EXPECTED` differences of
+`overview-native-limits`; the macOS and Windows pages only state that they are not available on this OS. Compare Linux
+runs with Linux runs only (another GraalVM release line, other fonts). On Linux, the pages expect what X11 does:
+the release after a drag has no click count and the wheel sends one event per notch (`awt-events`), F10 opens the first
+menu on its first item (`awt-menus`), MIME types are native clipboard formats (`dt-clipboard`), no drag images
+(`dt-dnd`), an output tray combo box in the print dialog and the "No print service found" message without printer
+(`print-dialogs`), `PSPrinterJob` printing to a stream service itself (`print-java2d`), the file view icons of the look
+and feel as system icons (`swing-choosers`).
 
 ## Writing a page
 
