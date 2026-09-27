@@ -518,3 +518,23 @@ Send the results (or attach them to an issue of quarkus-desktop):
 
 A missing registration (`Bad JNI lookup`, `MissingReflectionRegistrationError`, `NoSuchMethodError`...) goes into the
 `MAC_` lists of `AwtClassesAndResources` or `SwingClassesAndResources` of quarkus-desktop.
+
+### Results (September 2026)
+
+Apple silicon, macOS 27.0, one non-Retina display (scale 1 : the Retina scale is not verified), GraalVM CE 25.4.4.1.1,
+Quarkus built from the pull request 56979, the Screen Recording and Accessibility permissions granted
+(`-Dshowcase.robot=true`):
+
+- default variant: MATCH, every image identical except `overview-native-limits` (EXPECTED) and the color noise of the
+  raw Robot captures (see below); awt-only variant: MATCH ; `--exact` in both variants: no access missing from the
+  metadata, MATCH.
+- the pages need the showcase to be the active application: AWT never activates it, so a click or a typed key in
+  another application during a run takes the focus away and the Robot input of the following pages is skipped
+  (`not focused after 4 attempts` in run.log, then differences between the runs). Do not use the Mac while a cycle
+  runs, and rerun a cycle whose run.log has such lines.
+- the colors of Robot screen captures come through the color profile of the display, one to three levels apart
+  from one run to the next: the Robot pages compare screen colors within `RobotSession.COLOR_TOLERANCE` and report the
+  expected color then, and Compare reports the differences of the raw captures (`captures` of report.json) up to that
+  tolerance as NOISE.
+- the natural scrolling setting (System Settings, Mouse) changes the sign of the wheel rotations of `awt-events`: only
+  the "off" case was observed (`-1 2`); with it on, the page checks the magnitudes and shows the signs as information.
