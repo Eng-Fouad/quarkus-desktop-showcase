@@ -207,7 +207,10 @@ docker run --rm --init -v "$PWD":/showcase -v quarkus-desktop-linux-m2:/root/.m2
 ```
 
 The builds write `target/` and `comparison/` of the mounted directory (on Docker Desktop, a copy of the sources in a
-Docker volume builds faster). Expected results: `MATCH`, every page identical except the `EXPECTED` differences of
+Docker volume builds faster). Run the JVM and the native snapshots of a comparison in the same container (as
+`Cycle.java` does): `sound` renders a MIDI file with the default soundbank of the JDK, and without one (Linux, macOS) the
+JDK generates an emergency soundbank, different at each generation, that the first run caches in `~/.gervill` for the
+next ones. Expected results: `MATCH`, every page identical except the `EXPECTED` differences of
 `overview-native-limits`; the macOS and Windows pages only state that they are not available on this OS. Compare Linux
 runs with Linux runs only (another GraalVM release line, other fonts). `--pipeline=x11` (no XRender) and
 `--pipeline=opengl` (GLX, with the Mesa libraries of the image) run the cycle with another Java2D pipeline. The Robot
