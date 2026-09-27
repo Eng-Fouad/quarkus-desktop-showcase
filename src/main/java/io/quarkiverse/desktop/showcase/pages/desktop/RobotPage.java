@@ -401,7 +401,11 @@ public class RobotPage implements FeaturePage {
      * where a positive delta scrolls up, and {@code CPlatformResponder.dispatchScrollEvent} makes the rotation of the
      * event the opposite of the delta of the scroll event : {@code mouseWheel(n)} gives a rotation of {@code -n} (one
      * event per call). The JDK test {@code java/awt/Robot/RobotWheelTest} expects that sign on macOS
-     * ({@code wheelSign = Platform.isOSX() ? -1 : 1}).
+     * ({@code wheelSign = Platform.isOSX() ? -1 : 1}, JDK-8079255), whatever the natural scrolling setting
+     * ({@code com.apple.swipescrolldirection}, given to the WindowServer : {@code CGSSetSwipeScrollDirection}) : it inverts
+     * the scroll events of the devices before the event taps (they carry
+     * {@code NSEvent.isDirectionInvertedFromDevice}), not an event posted at {@code kCGHIDEventTap}. Verified here with
+     * natural scrolling off (a user setting, not changed by the showcase).
      */
     private static String wheelSummary() {
         return Platforms.isMac() ? "+1 -2" : "+2 -1";
@@ -466,7 +470,11 @@ public class RobotPage implements FeaturePage {
         }
         DesktopSupport.await(() -> keyLog.size() >= 13, 3000);
         DesktopSupport.sleep(100);
-        // the key names of the platform (symbols on macOS : Keys)
+        // the key names of the platform (symbols on macOS : Keys). On macOS the letters depend on the keyboard layout :
+        // CRobot presses fixed physical keys (CRobotKeyCodeMapping javaToMacKeyMap : VK_Q is the key of Q on a U.S.
+        // keyboard) and the key code received comes from the character of the layout (CPlatformResponder.handleKeyEvent
+        // gives charsIgnoringModifiers to NSEvent.nsToJavaKeyInfo) : the expected letters are those of a QWERTY layout
+        // (U.S.), e.g. an AZERTY layout gives A for VK_Q
         checks.add(Checks.expect("key presses (KeyEvent.getKeyText)", "Q U A R K U S " + Keys.text("Space") + " "
                 + Keys.text("Shift") + " A W T " + Keys.text("Backspace"),
                 () -> {
