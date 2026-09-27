@@ -302,7 +302,11 @@ public class SwingKeyBindingsPage implements FeaturePage {
     }
 
     private static JPanel demo(Demo u) {
-        // menu bar with accelerators (fired through KeyboardManager, the menus are never opened)
+        // menu bar with accelerators (fired through KeyboardManager, the menus are never opened). The accelerators stay
+        // Ctrl on every platform, unlike the menu bar of swing-menus-popups (Keys.menuShortcutMaskEx(), Command on
+        // macOS): this menu bar lies in a panel, never in a frame (never the macOS screen menu bar), and its strokes are
+        // dispatched as synthetic events only to exercise the WHEN_IN_FOCUSED_WINDOW path of KeyboardManager, where a
+        // KeyStroke matches the same way whatever its modifiers
         JMenuItem newItem = new JMenuItem(action(u, "New", "menu New (accelerator)"));
         newItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_N, CTRL_SHIFT));
         JMenuItem openItem = new JMenuItem(action(u, "Open", "menu Open (accelerator)"));
