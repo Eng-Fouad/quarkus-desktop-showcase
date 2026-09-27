@@ -15,7 +15,7 @@ import java.util.stream.Stream;
  * comparison/&lt;label&gt;/run.log.
  * <p>
  * usage: java tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] [--awt-only] [--hidpi]
- * [--screen] [--trace] [--timeout=seconds] [-- options...]
+ * [--pipeline=gdi|opengl|x11] [--screen] [--trace] [--timeout=seconds] [-- options...]
  * <ul>
  * <li>java tools/Snapshot.java jvm</li>
  * <li>java tools/Snapshot.java native native-d3d-off -- -Dsun.java2d.d3d=false</li>
@@ -26,6 +26,11 @@ import java.util.stream.Stream;
  * to the locale of the build machine) and {@code -Dsun.java2d.uiScale=1} (AWT heavyweight components render correctly
  * with printAll at scale 1 only). {@code --hidpi} keeps the real UI scale : its report shows whether the executable is
  * DPI aware (defaultTransform, screenResolution).
+ * <p>
+ * {@code --pipeline} selects another Java2D pipeline than the default one of the platform, for both runs of a
+ * comparison : {@code gdi} ({@code -Dsun.java2d.d3d=false} : GDI instead of Direct3D on Windows), {@code opengl}
+ * ({@code -Dsun.java2d.opengl=true} : WGL on Windows, GLX on Linux), {@code x11} ({@code -Dsun.java2d.xrender=false} :
+ * X11 instead of XRender on Linux). The environment key {@code pipeline} of the reports shows the pipeline in use.
  * <p>
  * macOS : the native executable is {@code target/*-runner} (next to its {@code .dylib} libraries). The defaults also
  * pin what the {@code java} launcher sets or what changes the rendering : {@code -Dapple.awt.application.name=Quarkus
@@ -68,6 +73,8 @@ public class Snapshot {
                 o.awtOnly = true;
             } else if (arg.equals("--hidpi")) {
                 o.hidpi = true;
+            } else if (arg.startsWith("--pipeline=")) {
+                o.pipeline = pipeline(arg.substring("--pipeline=".length()));
             } else if (arg.equals("--screen")) {
                 o.screen = true;
             } else if (arg.equals("--trace")) {
@@ -85,7 +92,8 @@ public class Snapshot {
         }
         if (positional.isEmpty() || !List.of("jvm", "native").contains(positional.getFirst())) {
             System.err.println("usage: java tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] "
-                    + "[--awt-only] [--hidpi] [--screen] [--trace] [--timeout=seconds] [-- options...]");
+                    + "[--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--screen] [--trace] [--timeout=seconds] "
+                    + "[-- options...]");
             System.exit(2);
         }
         String mode = positional.get(0);
@@ -101,6 +109,8 @@ public class Snapshot {
         String categories;
         boolean awtOnly;
         boolean hidpi;
+        /** A Java2D pipeline of {@link #PIPELINES}, or {@code null} for the default one. */
+        String pipeline;
         boolean screen;
         boolean trace;
         long timeoutSeconds = 900;
@@ -114,6 +124,7 @@ public class Snapshot {
             c.categories = categories;
             c.awtOnly = awtOnly;
             c.hidpi = hidpi;
+            c.pipeline = pipeline;
             c.screen = screen;
             c.trace = trace;
             c.timeoutSeconds = timeoutSeconds;
@@ -123,8 +134,22 @@ public class Snapshot {
         }
     }
 
+    /**
+     * The Java2D pipelines of {@code --pipeline} : name and system property.
+     */
+    static final java.util.Map<String, String> PIPELINES = java.util.Map.of("gdi", "-Dsun.java2d.d3d=false", "opengl",
+            "-Dsun.java2d.opengl=true", "x11", "-Dsun.java2d.xrender=false");
+
+    static String pipeline(String name) {
+        if (!PIPELINES.containsKey(name)) {
+            System.err.println("Unknown pipeline " + name + " : " + new java.util.TreeSet<>(PIPELINES.keySet()));
+            System.exit(2);
+        }
+        return name;
+    }
+
     static String defaultLabel(String mode, Options o) {
-        return mode + (o.awtOnly ? "-awt" : "") + (o.hidpi ? "-hidpi" : "");
+        return mode + (o.awtOnly ? "-awt" : "") + (o.hidpi ? "-hidpi" : "") + (o.pipeline != null ? "-" + o.pipeline : "");
     }
 
     static int run(String mode, String label, Options o) throws IOException, InterruptedException {
@@ -160,6 +185,13 @@ public class Snapshot {
         // heavyweight AWT components print correctly at scale 1 only ; --hidpi keeps the real scale
         if (!o.hidpi && o.options.stream().noneMatch(opt -> opt.startsWith("-Dsun.java2d.uiScale="))) {
             command.add("-Dsun.java2d.uiScale=1");
+        }
+        if (o.pipeline != null) {
+            String property = PIPELINES.get(o.pipeline);
+            String prefix = property.substring(0, property.indexOf('=') + 1);
+            if (o.options.stream().noneMatch(opt -> opt.startsWith(prefix))) {
+                command.add(property);
+            }
         }
         if (isMac()) {
             // set by the java launcher (the application name) or changing the rendering : the same in both runs

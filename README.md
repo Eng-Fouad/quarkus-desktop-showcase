@@ -67,14 +67,17 @@ java tools/Snapshot.java native               # comparison/native
 java tools/Compare.java comparison/jvm comparison/native comparison/diff   # summary.txt and index.html
 ```
 
-`tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] [--awt-only] [--hidpi] [--screen] [--trace]
-[-- options...]`:
+`tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] [--awt-only] [--hidpi]
+[--pipeline=gdi|opengl|x11] [--screen] [--trace] [-- options...]`:
 
 - `-Duser.language=en -Duser.country=US` and `-Dsun.java2d.uiScale=1` are added unless given after `--` (a native
   executable defaults to the locale of the build machine; AWT heavyweight components render correctly with `printAll`
   at scale 1 only).
 - `--hidpi` keeps the real UI scale. Forcing the scale to 1 hides a DPI unaware native executable: compare a `--hidpi`
   JVM run with a `--hidpi` native run (report keys `defaultTransform` and `screenResolution`).
+- `--pipeline` selects another Java2D pipeline than the default one of the platform: `gdi` (`-Dsun.java2d.d3d=false`,
+  GDI instead of Direct3D on Windows), `opengl` (`-Dsun.java2d.opengl=true`, WGL on Windows, GLX on Linux), `x11`
+  (`-Dsun.java2d.xrender=false` on Linux). Compare runs of the same pipeline (report key `pipeline`).
 - `--awt-only` runs the awt-only variant (`target/awt-only`). `--screen` also saves a Robot screen capture of the
   window per page (`<page>--screen.png`, reported as `SCREEN`, never a mismatch).
 - `--trace` (JVM only) runs under the GraalVM tracing agent (`comparison/<label>/metadata`), see below.
@@ -82,8 +85,8 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
   exceptions) to `<directory>/<sequence>-<sha256>.xml`: run it with one directory per runtime, then diff them when an
   `XML : lines, SHA-256` check differs.
 
-`java tools/Cycle.java <label> [--trace] [--exact] [--awt-only] [--hidpi] [--pages=...] [--offline] [--skip-jvm]
-[--skip-native-build] [--maven-args=a,b] [--native-args=a,b] [-- options]` runs a whole iteration: JVM build and
+`java tools/Cycle.java <label> [--trace] [--exact] [--awt-only] [--hidpi] [--pipeline=...] [--pages=...] [--offline]
+[--skip-jvm] [--skip-native-build] [--maven-args=a,b] [--native-args=a,b] [-- options]` runs a whole iteration: JVM build and
 snapshots, native build and snapshots, comparison (`comparison/{jvm,native,diff,logs}-<label>`). Run it with GraalVM's
 java (`$GRAALVM_HOME/bin/java tools/Cycle.java win1`): Maven builds with the JDK running the tool, and both runs then use
 the same JDK build. `--exact` builds with `--exact-reachability-metadata` and runs the executable with

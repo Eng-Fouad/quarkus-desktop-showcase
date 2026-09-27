@@ -12,11 +12,12 @@ import java.util.List;
  * (summary.txt, index.html), build logs in comparison/logs-&lt;label&gt;.
  * <p>
  * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline]
- * [--awt-only] [--hidpi] [--pages=ids] [--categories=names] [--maven-args=a,b] [--native-args=a,b]
- * [-- snapshot options...]
+ * [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] [--maven-args=a,b]
+ * [--native-args=a,b] [-- snapshot options...]
  * <p>
  * --awt-only builds and runs the AWT only variant (mvn -Dawt-only, target/awt-only). --hidpi runs both snapshot runs
- * without the -Dsun.java2d.uiScale=1 default (DPI awareness check). --maven-args is a comma separated list of extra
+ * without the -Dsun.java2d.uiScale=1 default (DPI awareness check). --pipeline runs both snapshot runs with another
+ * Java2D pipeline (see tools/Snapshot.java : gdi, opengl, x11). --maven-args is a comma separated list of extra
  * Maven arguments for both builds. --native-args is a comma separated list of native-image options, e.g.
  * --native-args=-H:+PrintClassInitialization. --exact builds with --exact-reachability-metadata and runs the native
  * executable with -XX:MissingRegistrationReportingMode=Warn : the reflection, JNI and resource accesses missing from the
@@ -37,8 +38,8 @@ public class Cycle {
     public static void main(String[] args) throws Exception {
         if (args.length == 0 || args[0].startsWith("--")) {
             System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline] "
-                    + "[--awt-only] [--hidpi] [--pages=ids] [--categories=names] [--maven-args=a,b] [--native-args=a,b] "
-                    + "[-- snapshot options...]");
+                    + "[--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] "
+                    + "[--maven-args=a,b] [--native-args=a,b] [-- snapshot options...]");
             System.exit(2);
         }
         String label = args[0];
@@ -71,6 +72,8 @@ public class Cycle {
                 snapshot.awtOnly = true;
             } else if (arg.equals("--hidpi")) {
                 snapshot.hidpi = true;
+            } else if (arg.startsWith("--pipeline=")) {
+                snapshot.pipeline = Snapshot.pipeline(arg.substring("--pipeline=".length()));
             } else if (arg.startsWith("--pages=")) {
                 snapshot.pages = arg.substring("--pages=".length());
             } else if (arg.startsWith("--categories=")) {
