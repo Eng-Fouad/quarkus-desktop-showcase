@@ -343,7 +343,9 @@ public final class RobotSession implements AutoCloseable {
      * into the page otherwise), a small move over the drop target, then a click on it, end the loop (the drop then
      * fails or succeeds, the caller checks). The click is made only while a showcase window is focused ({@link #press})
      * and, on Windows, only where the window under the target belongs to this process
-     * ({@link Foreground#thisProcessAt}). Call it before {@link #releaseAll()} : the modifier keys of the drag stay
+     * ({@link Foreground#thisProcessAt}), except in unattended runs ({@code -Dshowcase.activate=true} : the drag of the
+     * first run of a CI runner stayed pending, the click would have been skipped). Call it before {@link #releaseAll()} :
+     * the modifier keys of the drag stay
      * pressed until the drop is done (the drag loop reads them when it handles the release of the button). At most
      * 11 s.
      *
@@ -359,6 +361,15 @@ public final class RobotSession implements AutoCloseable {
         move(new Point(target.x + 1, target.y + 1));
         if (Focus.await(ended, 3000)) {
             return true;
+        }
+        if (Focus.ACTIVATE) {
+            // unattended runs (CI) : no user application to click into, and the drag loop may leave the foreground
+            // or the window under the target to another process (the drag image of the shell) : a click whatever the
+            // focus and that window
+            LOG.infof("drop at %d,%d not ended : click (-Dshowcase.activate=true)", target.x, target.y);
+            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+            return Focus.await(ended, 4000);
         }
         if (Boolean.FALSE.equals(Foreground.thisProcessAt(target))) {
             LOG.infof("drop at %d,%d not ended : no click, the window under the target belongs to another process",
