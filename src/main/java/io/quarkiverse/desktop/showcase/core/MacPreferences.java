@@ -26,14 +26,16 @@ public final class MacPreferences {
 
     /**
      * The scroll direction of macOS (System Settings, Mouse / Trackpad, "Natural scrolling") : the global default
-     * {@code com.apple.swipescrolldirection}, {@code true} when it is absent (the default of macOS). It gives the
-     * direction of the wheel events of {@code java.awt.Robot} : {@code CRobot.mouseWheel} posts a scroll wheel event of
-     * {@code wheelAmt} lines (native {@code CGEventCreateScrollWheelEvent}), which macOS turns like the events of a
-     * real wheel, and AWT negates the delta of the {@code NSEvent} it receives
-     * ({@code CPlatformResponder.dispatchScrollEvent} : "invert the wheelRotation for the peer"). Without natural
+     * {@code com.apple.swipescrolldirection}, {@code true} when it is absent (the default of macOS). Without natural
      * scrolling, {@code Robot.mouseWheel(n)} gives a rotation of {@code -n} (seen on macOS 27, in the JVM and in a
-     * native executable) ; with natural scrolling, the default of macOS, the posted event is inverted like a real
-     * wheel's and the rotation is {@code n}, as specified by {@code Robot.mouseWheel}.
+     * native executable) : {@code CRobot.mouseWheel} posts a scroll wheel event of {@code wheelAmt} lines (native
+     * {@code CGEventCreateScrollWheelEvent}), and AWT negates the delta of the {@code NSEvent} it receives
+     * ({@code CPlatformResponder.dispatchScrollEvent} : "invert the wheelRotation for the peer"). With natural
+     * scrolling the direction is NOT known (never observed : whether macOS inverts a posted scroll event like the
+     * events of a real wheel, or only the events of the devices, is decided in the window server, not in the JDK) : the
+     * pages check only what does not depend on it there.
+     * <p>
+     * Read on a background thread (it runs {@code /usr/bin/defaults}, at most 5 s), once.
      *
      * @return {@code null} on another operating system, or when the preference cannot be read
      */
@@ -51,14 +53,16 @@ public final class MacPreferences {
             Process process = new ProcessBuilder("/usr/bin/defaults", "read", "-g", "com.apple.swipescrolldirection")
                     .redirectErrorStream(true).start();
             process.getOutputStream().close();
-            String output;
-            try (InputStream in = process.getInputStream()) {
-                output = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
-            }
+            // the wait first : reading the output would block until the process closes it, with no limit (the output,
+            // a value or an error line, fits in the pipe buffer : the process never waits for this reader)
             if (!process.waitFor(5, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 LOG.warn("defaults read -g com.apple.swipescrolldirection did not end");
                 return null;
+            }
+            String output;
+            try (InputStream in = process.getInputStream()) {
+                output = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
             }
             if (process.exitValue() == 0 && (output.equals("0") || output.equals("1"))) {
                 return output.equals("1");

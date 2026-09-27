@@ -809,19 +809,11 @@ public class AwtEventsPage implements FeaturePage {
                     }
                     Point origin = target.getLocationOnScreen();
                     boolean capsLock = capsLock();
-                    Boolean naturalScrolling = MacPreferences.naturalScrolling();
                     return Edt.background(() -> drive(target, global, origin, !capsLock)).thenApply(result -> {
                         List<Check> checks = new ArrayList<>(result);
                         checks.add(0, Check.attempts("target frame focused", focused));
                         checks.add(0, Check.info("keyboard input", capsLock ? "skipped: caps lock is on" : "sent"));
                         checks.add(1, Check.info("keyboard layout (input method locale)", AwtSupport.inputLocale()));
-                        if (Platforms.isMac()) {
-                            // the direction of the Robot wheel events on macOS (see expectedMouse)
-                            checks.add(2, Check.info(
-                                    "scroll direction (macOS preference com.apple.swipescrolldirection)",
-                                    naturalScrolling == null ? "unknown"
-                                            : naturalScrolling ? "natural" : "not natural"));
-                        }
                         List<String> log = new ArrayList<>(target.log);
                         checks.add(Checks.expect("AWTEventListener saw the same events as the canvas listeners", true,
                                 () -> counts(log).equals(countNames(global))));
@@ -867,22 +859,50 @@ public class AwtEventsPage implements FeaturePage {
      * <p>
      * macOS : {@code CRobot} counts the clicks itself (native {@code GetClickCount} of {@code CRobot.m}, whatever the
      * button) : a mouse move resets the time of the last click, and a release longer than the double click interval
-     * after it has the click count 0 : as on X11, the release after the drag has none. One wheel event per Robot call,
-     * in the direction of the scroll preference of macOS ({@link MacPreferences#naturalScrolling()} : {@code n}
-     * notches give a rotation of {@code n} with natural scrolling, {@code -n} without) ; {@code null} (no expectation)
-     * when that preference is unknown.
+     * after it has the click count 0 : as on X11, the release after the drag has none. One wheel event per Robot call
+     * ({@code CRobot.mouseWheel} posts one scroll wheel event of {@code wheelAmt} lines), whose delta AWT negates
+     * ({@code CPlatformResponder.dispatchScrollEvent} : "invert the wheelRotation for the peer") : {@code -1 2} for
+     * {@code mouseWheel(1)}, {@code mouseWheel(-2)} without natural scrolling (seen on macOS 27, JVM and native). With
+     * natural scrolling, or when that preference cannot be read ({@link MacPreferences#naturalScrolling()}), the
+     * direction of the posted events is not known (never observed : see {@link MacPreferences#naturalScrolling()}) :
+     * the magnitudes and the opposite signs only ({@link #wheelValue}).
      */
     private static List<String> expectedMouse() {
         if (Platforms.isMac()) {
-            Boolean natural = MacPreferences.naturalScrolling();
-            return Arrays.asList("MOUSE_ENTERED (40,40)", "1 2 1",
-                    "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1",
-                    natural == null ? null : natural ? "1 -2" : "-1 2");
+            return List.of("MOUSE_ENTERED (40,40)", "1 2 1", "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1",
+                    wheelSigned() ? "-1 2" : "1 2, opposite signs");
         }
         boolean x11 = Platforms.isLinux();
         return List.of("MOUSE_ENTERED (40,40)", "1 2 1",
                 "(100,70) (140,90) / MOUSE_RELEASED (140,90) button=1" + (x11 ? "" : " clicks=1"),
                 x11 ? "1 -1 -1" : "1 -2");
+    }
+
+    /**
+     * {@code true} when the signs of the wheel rotations are known : always on Windows and Linux ; on macOS only
+     * without natural scrolling (see {@link #expectedMouse()}). On a background thread (it may run
+     * {@code /usr/bin/defaults} the first time).
+     */
+    private static boolean wheelSigned() {
+        return !Platforms.isMac() || Boolean.FALSE.equals(MacPreferences.naturalScrolling());
+    }
+
+    /**
+     * The value of the "wheel rotations" check for the rotations {@code rotations} (see {@link #results}) : the
+     * rotations, or, when their signs are not known ({@link #wheelSigned()}), their magnitudes and whether the two
+     * signs are opposite ({@code mouseWheel(1)} then {@code mouseWheel(-2)} : "1 2, opposite signs").
+     */
+    private static String wheelValue(String rotations) {
+        if (wheelSigned()) {
+            return rotations;
+        }
+        List<Integer> values = rotations.isBlank() ? List.of()
+                : Arrays.stream(rotations.split(" ")).map(Integer::valueOf).toList();
+        boolean opposite = values.size() == 2 && values.get(0) != 0
+                && Integer.signum(values.get(0)) == -Integer.signum(values.get(1));
+        return (values.isEmpty() ? "none"
+                : String.join(" ", values.stream().map(value -> String.valueOf(Math.abs(value))).toList()))
+                + (opposite ? ", opposite signs" : ", not opposite signs");
     }
 
     /**
@@ -951,16 +971,11 @@ public class AwtEventsPage implements FeaturePage {
     }
 
     /**
-     * {@code true} when {@code results} (the mouse results, then the keys) has the {@code expected} ones
-     * ({@code null} : any value).
+     * The mouse results of {@code results} (see {@link #results}) as the checks compare them : the wheel rotations
+     * through {@link #wheelValue}.
      */
-    private static boolean matches(List<String> results, List<String> expected) {
-        for (int i = 0; i < expected.size(); i++) {
-            if (expected.get(i) != null && !expected.get(i).equals(results.get(i))) {
-                return false;
-            }
-        }
-        return true;
+    private static List<String> mouseValues(List<String> results) {
+        return List.of(results.get(0), results.get(1), results.get(2), wheelValue(results.get(3)));
     }
 
     /** Attempts of the Robot sequence : another application may take the foreground at any time. */
@@ -973,6 +988,12 @@ public class AwtEventsPage implements FeaturePage {
      */
     private List<Check> drive(RecordingCanvas target, List<String> global, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
+        if (Platforms.isMac()) {
+            // the direction of the Robot wheel events there (see expectedMouse) : read here, off the EDT
+            Boolean natural = MacPreferences.naturalScrolling();
+            checks.add(Check.info("scroll direction (macOS preference com.apple.swipescrolldirection)",
+                    natural == null ? "unknown" : natural ? "natural" : "not natural"));
+        }
         try (RobotSession robot = RobotSession.open()) {
             if (Platforms.isMac()) {
                 // the screen pixels include the pointer there (see probe) : away from the pixels probed below
@@ -1017,9 +1038,12 @@ public class AwtEventsPage implements FeaturePage {
                     io.quarkiverse.desktop.showcase.core.Platforms.isWindows() ? "MOUSE_RELEASED" : "MOUSE_PRESSED",
                     () -> finalLog.stream().filter(entry -> entry.contains("popupTrigger"))
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
-            checks.add(expectedMouse.get(3) == null
-                    ? Check.info("wheel rotations", results.get(3) + " (scroll direction of macOS unknown)")
-                    : Checks.expect("wheel rotations", expectedMouse.get(3), () -> results.get(3)));
+            checks.add(Checks.expect("wheel rotations", expectedMouse.get(3), () -> wheelValue(results.get(3))));
+            if (!wheelSigned()) {
+                // macOS with natural scrolling (or unknown) : the signs as they came, not checked (see expectedMouse)
+                checks.add(Check.info("wheel rotations with their signs (natural scrolling : not verified)",
+                        results.get(3)));
+            }
             if (keys) {
                 checks.add(Checks.expect("pressed keys", expectedKeys(), () -> results.get(4)));
                 // the characters depend on the keyboard layout (Arabic letters with an Arabic layout)
@@ -1042,7 +1066,7 @@ public class AwtEventsPage implements FeaturePage {
      */
     private static boolean complete(List<String> log, boolean keys) {
         List<String> results = results(log, keys);
-        return matches(results, expectedMouse()) && (!keys || results.get(4).equals(expectedKeys()))
+        return mouseValues(results).equals(expectedMouse()) && (!keys || results.get(4).equals(expectedKeys()))
                 && log.stream().anyMatch(entry -> entry.contains("popupTrigger"));
     }
 
