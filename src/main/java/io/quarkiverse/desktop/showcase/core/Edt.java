@@ -204,6 +204,30 @@ public final class Edt {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() != null;
     }
 
+    /**
+     * {@link #ownsFocus()}, waiting up to {@code timeoutMillis} for the focus to come back (off the EDT only) : while
+     * the window manager moves the focus (a click on a window, an activation), the application briefly has no focused
+     * window (X11 : FocusOut, then FocusIn). Nothing is typed meanwhile.
+     */
+    public static boolean awaitFocus(long timeoutMillis) {
+        if (ownsFocus() || isEdt()) {
+            return ownsFocus();
+        }
+        long end = System.nanoTime() + timeoutMillis * 1_000_000;
+        while (System.nanoTime() < end) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            if (ownsFocus()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static synchronized ScheduledExecutorService scheduler() {
         if (scheduler == null) {
             ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, runnable -> {

@@ -54,7 +54,7 @@ final class RobotSupport implements AutoCloseable {
         int pressed = 0;
         try {
             for (int key : keys) {
-                if (!Edt.ownsFocus()) {
+                if (!Edt.awaitFocus(500)) {
                     skipped.add("key " + java.awt.event.KeyEvent.getKeyText(key));
                     return false;
                 }
@@ -74,6 +74,22 @@ final class RobotSupport implements AutoCloseable {
      * {@code true} when the screen pixel at {@code screen} has the color {@code rgb} : checked right before a click, so
      * that a click never lands on another window that happens to cover the target.
      */
+    /**
+     * Waits up to {@code timeoutMillis} until the screen pixel at {@code screen} has the color {@code rgb} (a new window
+     * mapped and painted : the X server shows its unpainted background until then) ; {@code true} when it has.
+     */
+    boolean waitForPixel(Point screen, int rgb, long timeoutMillis) {
+        long end = System.nanoTime() + timeoutMillis * 1_000_000;
+        while ((robot.getPixelColor(screen.x, screen.y).getRGB() & 0xFFFFFF) != (rgb & 0xFFFFFF)) {
+            if (System.nanoTime() > end) {
+                return false;
+            }
+            robot.delay(50);
+            robot.waitForIdle();
+        }
+        return true;
+    }
+
     boolean pixelIs(Point screen, int rgb) {
         boolean same = (robot.getPixelColor(screen.x, screen.y).getRGB() & 0xFFFFFF) == (rgb & 0xFFFFFF);
         if (!same) {

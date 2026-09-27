@@ -67,6 +67,8 @@ public class AwtMenusPage implements FeaturePage {
 
     private static final int FRAME_WIDTH = 560;
     private static final int FRAME_HEIGHT = 380;
+    /** The opaque window behind the menu frame. */
+    private static final int BACKDROP = 0xCFD8DC;
 
     // per build state
     private MenuFrame menuFrame;
@@ -494,7 +496,7 @@ public class AwtMenusPage implements FeaturePage {
         // an opaque window behind the frame : the captures never show the desktop (rounded corners, shadow)
         Rectangle behind = frame.getBounds();
         behind.grow(40, 40);
-        backdrop = new AwtSupport.SolidWindow(behind, 0xCFD8DC);
+        backdrop = new AwtSupport.SolidWindow(behind, BACKDROP);
         backdrop.setVisible(true);
         frame.setAlwaysOnTop(true);
         frame.setAutoRequestFocus(true);
@@ -551,6 +553,15 @@ public class AwtMenusPage implements FeaturePage {
             // the pointer away from the menus (a stationary pointer under a new menu highlights an item)
             robot.move(new Point(canvas.x + size.width - 8, canvas.y + size.height - 8));
             robot.delay(300);
+            // the frame above the backdrop : both are always on top, and without a window manager the X server keeps
+            // them in the order they were mapped (the backdrop last)
+            Point center = new Point(canvas.x + size.width / 2, canvas.y + size.height / 2);
+            for (int i = 0; i < 5 && (robot.robot().getPixelColor(center.x, center.y).getRGB() & 0xFFFFFF) == BACKDROP;
+                    i++) {
+                java.awt.EventQueue.invokeAndWait(m.frame::toFront);
+                robot.delay(200);
+                robot.idle();
+            }
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
 

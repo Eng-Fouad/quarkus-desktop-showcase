@@ -766,6 +766,10 @@ public class AwtEventsPage implements FeaturePage {
         targetFrame.requestFocus();
         target.requestFocusInWindow();
         return Edt.until(target::isFocusOwner, 3000, "target canvas focused").handle((v, error) -> error == null)
+                // X11 without window manager : the location of the frame is known once the X server confirmed it
+                // (ConfigureNotify), which may come after the focus
+                .thenCompose(focused -> Edt.until(() -> targetFrame.getLocationOnScreen().distance(area.getLocation()) < 64,
+                        2000, "target frame placed").handle((v, error) -> focused))
                 .thenCompose(focused -> {
                     if (!focused) {
                         return CompletableFuture.completedFuture(List.of(Check.info("Robot input",
@@ -820,10 +824,11 @@ public class AwtEventsPage implements FeaturePage {
     private List<Check> drive(RecordingCanvas target, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
         try (RobotSupport robot = RobotSupport.create()) {
-            // the new frame is painted
+            // the new frame is painted (a slower first paint shows the background of the native window until then)
             robot.delay(300);
             robot.idle();
             Point probe = new Point(origin.x + CANVAS_WIDTH - 20, origin.y + 20);
+            robot.waitForPixel(probe, CANVAS_COLOR, 3000);
             Color seen = robot.robot().getPixelColor(probe.x, probe.y);
             checks.add(Checks.expect("Robot.getPixelColor inside the canvas", Checks.argb(0xFF000000 | CANVAS_COLOR),
                     () -> Checks.argb(seen.getRGB())));

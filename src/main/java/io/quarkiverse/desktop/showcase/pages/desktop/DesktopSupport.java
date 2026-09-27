@@ -238,6 +238,9 @@ public final class DesktopSupport {
      */
     public static final class RobotSession implements AutoCloseable {
 
+        /** How long a press waits for the focus to come back to a showcase window (see {@link Edt#awaitFocus}). */
+        private static final long FOCUS_WAIT_MILLIS = 500;
+
         private final Robot robot;
         private final Point pointer;
         private final Set<Integer> buttons = new LinkedHashSet<>();
@@ -285,7 +288,7 @@ public final class DesktopSupport {
          * @return {@code false} (nothing pressed) when no showcase window is focused
          */
         public boolean press(int mask) {
-            if (!Edt.ownsFocus()) {
+            if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
                 return false;
             }
             robot.mousePress(mask);
@@ -315,7 +318,7 @@ public final class DesktopSupport {
             if (!java.awt.EventQueue.isDispatchThread()) {
                 robot.waitForIdle();
             }
-            if (!Edt.ownsFocus()) {
+            if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
                 return false;
             }
             robot.keyPress(keyCode);

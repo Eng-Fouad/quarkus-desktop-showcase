@@ -73,6 +73,7 @@ public class AwtWindowsPage implements FeaturePage {
     private static final int CELL_HEIGHT = 280;
     private static final int MARGIN = 20;
     private static final int BACKDROP = 0xDDE3EA;
+    private static final int POPUP_COLOR = 0xFFFDE7;
     private static final int OPACITY_COLOR = 0x1565C0;
     private static final float OPACITY = 0.6f;
     private static final int SHAPE_COLOR = 0x2E7D32;
@@ -405,7 +406,7 @@ public class AwtWindowsPage implements FeaturePage {
         show(utility);
         Window popup = new Window(iconFrame);
         popup.setType(Window.Type.POPUP);
-        popup.add(label("Window.Type.POPUP", 0xFFFDE7, 0x5D4037));
+        popup.add(label("Window.Type.POPUP", POPUP_COLOR, 0x5D4037));
         popup.setBounds(inner(cell(area, 5)));
         show(popup);
 
@@ -516,6 +517,14 @@ public class AwtWindowsPage implements FeaturePage {
                 .thenCompose(v -> Edt.background(() -> {
                     try (RobotSupport robot = RobotSupport.create()) {
                         robot.idle();
+                        // X11 : the POPUP window is an override-redirect window, which the window manager does not
+                        // manage : when it restacks the always-on-top windows it manages, they may cover it
+                        Rectangle popupBounds = inner(cell(area, 5));
+                        Point popupCenter = new Point((int) popupBounds.getCenterX(), popupBounds.y + 30);
+                        for (int i = 0; i < 5 && Platforms.isLinux() && !robot.waitForPixel(popupCenter, POPUP_COLOR, 300);
+                                i++) {
+                            EventQueue.invokeAndWait(popup::toFront);
+                        }
                         return robot.capture(area);
                     }
                 }))
