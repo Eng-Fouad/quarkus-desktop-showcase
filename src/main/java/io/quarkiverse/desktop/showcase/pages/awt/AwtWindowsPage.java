@@ -19,6 +19,7 @@ import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.IllegalComponentStateException;
 import java.awt.Image;
+import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
 import java.awt.Label;
 import java.awt.Panel;
@@ -83,6 +84,7 @@ public class AwtWindowsPage implements FeaturePage {
     private static final int OPAQUE_CIRCLE = 0x6A1B9A;
     private static final int CUTOUT_COLOR = 0xFF9800;
     private static final int HIDDEN_COLOR = 0x1E88E5;
+    private static final String DECORATED_INSETS = "decorated Frame insets (normal / not resizable / UTILITY)";
     private static final String[] CELLS = { "decorated Frame, icon images", "Frame, not resizable", "undecorated Frame",
             "Dialog (owner: first frame)", "Window.Type.UTILITY", "Window.Type.POPUP", "setOpacity(0.6)",
             "setShape(RoundRectangle2D)", "setShape(Ellipse2D) + Button", "per-pixel translucency",
@@ -217,8 +219,8 @@ public class AwtWindowsPage implements FeaturePage {
                 frame.dispose();
             }
         }));
-        checks.add(Checks.info("decorated Frame insets (normal / not resizable / UTILITY)", () -> insets(Window.Type.NORMAL, true)
-                + " / " + insets(Window.Type.NORMAL, false) + " / " + insets(Window.Type.UTILITY, true)));
+        // read in ready() (see decoratedInsets)
+        checks.add(Check.info(DECORATED_INSETS, "pending"));
         checks.add(Checks.expect("window types (default, UTILITY, POPUP)", "NORMAL UTILITY POPUP", () -> {
             Frame frame = new Frame();
             Frame utility = new Frame();
@@ -238,14 +240,34 @@ public class AwtWindowsPage implements FeaturePage {
         return checks;
     }
 
-    private static String insets(Window.Type type, boolean resizable) {
+    /**
+     * A displayable decorated frame, not shown, for the check {@link #DECORATED_INSETS} (see {@link #decoratedInsets}).
+     */
+    private Frame insetsFrame(Window.Type type, boolean resizable) {
         Frame frame = new Frame();
         frame.setType(type);
         frame.setResizable(resizable);
-        try {
-            frame.addNotify();
-            return AwtSupport.insets(frame.getInsets());
-        } finally {
+        frame.addNotify();
+        windows.add(frame);
+        return frame;
+    }
+
+    /**
+     * The check {@link #DECORATED_INSETS} : the insets of displayable decorated frames that are not shown, read once the
+     * window manager has managed a frame shown after them. X11 : when AWT creates the peer of a decorated frame, it asks
+     * the window manager for its frame extents (_NET_REQUEST_FRAME_EXTENTS), and the peer of a frame that is not
+     * resizable resets its insets (XDecoratedPeer.setResizable) : its first getInsets returns the answer of the window
+     * manager when it has arrived (openbox : 18,1,1,1, no handle), the guess of the toolkit otherwise (25,5,5,5, which
+     * the resizable frames keep until they are shown). Read right after addNotify, the value depended on how fast
+     * openbox answered. It has answered once it has managed a frame shown after them : it handles the requests in order.
+     */
+    private void decoratedInsets(List<Frame> frames) {
+        List<Check> checks = new ArrayList<>(apiView.getChecks());
+        Check insets = Checks.info(DECORATED_INSETS, () -> String.join(" / ",
+                frames.stream().map(frame -> AwtSupport.insets(frame.getInsets())).toList()));
+        checks.replaceAll(check -> check.name().equals(DECORATED_INSETS) ? insets : check);
+        apiView.setChecks(checks);
+        for (Frame frame : frames) {
             frame.dispose();
         }
     }
@@ -469,9 +491,17 @@ public class AwtWindowsPage implements FeaturePage {
                 stateLog.add(AwtSupport.idName(e));
             }
         });
+        // before the frame states : see decoratedInsets
+        List<Frame> insetsFrames = List.of(insetsFrame(Window.Type.NORMAL, true), insetsFrame(Window.Type.NORMAL, false),
+                insetsFrame(Window.Type.UTILITY, true));
+        // the peer, not mapped yet : its insets are still the ones the toolkit guesses (see frameExtents)
+        states.addNotify();
+        Insets guessedInsets = states.getInsets();
         show(states);
 
-        return Edt.rounds(3)
+        return frameExtents(states, guessedInsets)
+                .thenAccept(v -> decoratedInsets(insetsFrames))
+                .thenCompose(v -> Edt.rounds(3))
                 .thenCompose(v -> state(states, Frame.MAXIMIZED_BOTH, stateLog))
                 .thenCompose(v -> state(states, Frame.NORMAL, stateLog))
                 .thenCompose(v -> state(states, Frame.ICONIFIED, stateLog))
@@ -488,6 +518,10 @@ public class AwtWindowsPage implements FeaturePage {
                             () -> String.join(", ", stateLog))));
                     stateChecks.add(Checks.onlyOn(Platforms.Os.WINDOWS, Checks.expect("getExtendedState()", "MAXIMIZED_BOTH",
                             () -> AwtSupport.frameState(states.getExtendedState()))));
+                    // X11 (openbox) : the window manager applies the size of the maximized bounds (the maximum size
+                    // hint of the client area) but not their location (the frame goes to the origin of the work area),
+                    // and AWT computes the bounds of the maximized frame from its client area and the frame extents of
+                    // the normal frame that it keeps (see frameExtents)
                     stateChecks.add(Checks.info("maximized bounds / frame bounds (relative to the cell)", () -> {
                         Rectangle max = states.getMaximizedBounds();
                         Rectangle b = states.getBounds();
@@ -524,12 +558,17 @@ public class AwtWindowsPage implements FeaturePage {
                         robot.idle();
                         // X11 : the POPUP window is an override-redirect window, which the window manager does not
                         // manage : when it restacks the always-on-top windows it manages (the page window focused
-                        // again above), they may cover it
+                        // again above), they may cover it. A compositing manager may also keep it below the others
+                        // while the X server has it on top (see recreateOnTop) : then only a new native window helps.
                         if (Platforms.isLinux()) {
+                            String action = "awt-windows POPUP window above the others";
                             Rectangle popupBounds = inner(cell(area, 5));
                             Point popupCenter = new Point((int) popupBounds.getCenterX(), popupBounds.y + 30);
-                            robot.raiseUntil("awt-windows POPUP window above the others", popup, popupCenter,
-                                    rgb -> rgb == POPUP_COLOR, 5, 300);
+                            if (robot.raiseUntil(action, popup, popupCenter, rgb -> rgb == POPUP_COLOR, 5, 300) < 0) {
+                                RobotSession.logRetry(action, 6, "still covered after 5 raises : new native window");
+                                EventQueue.invokeAndWait(() -> recreateOnTop(popup));
+                                robot.raiseUntil(action, popup, popupCenter, rgb -> rgb == POPUP_COLOR, 5, 300);
+                            }
                         }
                         return robot.capture(area);
                     }
@@ -548,6 +587,24 @@ public class AwtWindowsPage implements FeaturePage {
                             undecorated::isDisplayable));
                     galleryView.setChecks(checks);
                 });
+    }
+
+    /**
+     * X11 with xcompmgr : shows {@code window} (an override-redirect POPUP window) in a new native window, which the
+     * compositing manager adds at the top of its window list.
+     * <p>
+     * xcompmgr keeps a list of the top-level windows in stacking order, updated from the ConfigureNotify events : a
+     * window restacked above a sibling that is not in the list goes to the bottom (restack_win), and a window destroyed
+     * before xcompmgr handles its CreateNotify never enters the list. openbox answers the _NET_REQUEST_FRAME_EXTENTS
+     * that AWT sends before showing a decorated frame or dialog with a short-lived pretend frame (client_fake_manage : a
+     * top-level window, destroyed right after). When the POPUP window is shown during that time (the native executable
+     * shows the windows of the page fast enough, now and then), XMapRaised restacks it above the pretend frame : xcompmgr
+     * then composites it below the others (below the opaque backdrop) while the X server has it on top, so toFront does
+     * not restack it any more, and neither a repaint nor hiding and showing it again changes that.
+     */
+    private static void recreateOnTop(Window window) {
+        window.dispose();
+        window.setVisible(true);
     }
 
     private void show(Window window) {
@@ -572,6 +629,27 @@ public class AwtWindowsPage implements FeaturePage {
         }, 3000, "frame state " + AwtSupport.frameState(state))
                 .handle((v, error) -> null)
                 .thenCompose(v -> Edt.delay(300));
+    }
+
+    /**
+     * X11 : waits (at most 3 s) until AWT has the frame extents of a frame just shown, i.e. until its insets are no longer
+     * those that the toolkit guessed when it created the peer ({@code guessed} : 25,5,5,5 under a window manager that AWT
+     * does not know, such as openbox). XDecoratedPeer keeps the frame extents that it reads first (_NET_FRAME_EXTENTS,
+     * when it handles the answer of the window manager to its _NET_REQUEST_FRAME_EXTENTS or the reparenting of the
+     * frame) : it follows their later changes under Mutter and Unity/Compiz only. The extents of openbox (the theme of the
+     * Linux container) differ between a normal frame (1,1,18,5 : left, right, top, bottom) and a maximized one (0,0,17,0).
+     * A maximize request sent before the window manager has managed the frame races with that read : openbox, still busy
+     * with the other windows of the page, manages the frame and applies the queued request back to back, and when AWT
+     * reads the extents after that (now and then with the fast native executable), it keeps those of the maximized
+     * frame. The bounds of the maximized frame are then those of the openbox frame (0,24 320x237) instead of its client
+     * area expanded by the extents of the normal frame (-1,23 322x243).
+     */
+    private static CompletionStage<Void> frameExtents(Frame frame, Insets guessed) {
+        if (!Platforms.isLinux()) {
+            // Windows and macOS : the insets of the peer are those of the native window from its creation
+            return CompletableFuture.completedFuture(null);
+        }
+        return Edt.until(() -> !frame.getInsets().equals(guessed), 3000, "frame extents").handle((v, error) -> null);
     }
 
     /**
