@@ -884,8 +884,10 @@ public class AwtEventsPage implements FeaturePage {
             checks.add(Checks.expect("mouse clicks : click counts", "1 2 1",
                     () -> String.join(" ", log.stream().filter(entry -> entry.startsWith("MOUSE_CLICKED"))
                             .map(entry -> entry.replaceAll(".*clicks=(\\d+).*", "$1")).toList())));
+            // X11 resets the click count once the pointer moves away from the press point (XWindow.handleMotionNotify)
+            boolean x11 = io.quarkiverse.desktop.showcase.core.Platforms.isLinux();
             checks.add(Checks.expect("drag : MOUSE_DRAGGED events, then the release", "(100,70) (140,90) / MOUSE_RELEASED "
-                    + "(140,90) button=1 clicks=1", () -> String.join(" ", log.stream()
+                    + "(140,90) button=1" + (x11 ? "" : " clicks=1"), () -> String.join(" ", log.stream()
                             .filter(entry -> entry.startsWith("MOUSE_DRAGGED"))
                             .map(entry -> entry.replaceAll("MOUSE_DRAGGED (\\(\\d+,\\d+\\)).*", "$1")).toList())
                             + " / " + log.stream().filter(entry -> entry.startsWith("MOUSE_RELEASED (140,90) button=1"))
@@ -894,7 +896,8 @@ public class AwtEventsPage implements FeaturePage {
                     io.quarkiverse.desktop.showcase.core.Platforms.isWindows() ? "MOUSE_RELEASED" : "MOUSE_PRESSED",
                     () -> log.stream().filter(entry -> entry.contains("popupTrigger"))
                             .map(entry -> entry.substring(0, entry.indexOf(' '))).findFirst().orElse("none")));
-            checks.add(Checks.expect("wheel rotations", "1 -2", () -> String.join(" ", log.stream()
+            // Windows sends one event per Robot call, X11 one per notch (a press and release of the wheel buttons)
+            checks.add(Checks.expect("wheel rotations", x11 ? "1 -1 -1" : "1 -2", () -> String.join(" ", log.stream()
                     .filter(entry -> entry.startsWith("MOUSE_WHEEL"))
                     .map(entry -> entry.replaceAll(".*rotation=(-?\\d+).*", "$1")).toList())));
             if (keys) {

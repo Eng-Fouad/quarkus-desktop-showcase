@@ -412,12 +412,8 @@ public class AwtMenusPage implements FeaturePage {
 
         return Edt.rounds(3)
                 .thenCompose(v -> shortcutChecks(m, checks))
-                .thenCompose(v -> {
-                    Frame bare = new Frame();
-                    bare.setBounds(frame.getBounds());
-                    bare.addNotify();
-                    Insets without = bare.getInsets();
-                    bare.dispose();
+                .thenCompose(v -> bareInsets(frame.getBounds()))
+                .thenCompose(without -> {
                     Insets with = frame.getInsets();
                     checks.add(Checks.expect("Frame insets : the menu bar adds to the top inset", "true, same left/right",
                             () -> (with.top > without.top) + ", " + (with.left == without.left && with.right == without.right
@@ -455,6 +451,31 @@ public class AwtMenusPage implements FeaturePage {
             m.events.clear();
             return null;
         });
+    }
+
+    /**
+     * The insets of a frame without menu bar at {@code bounds}. The native peer computes them on Windows. On X11 they are
+     * guessed until the window manager has framed the window (_NET_FRAME_EXTENTS) : the frame is shown there (not
+     * focusable), until its insets are known.
+     */
+    private static CompletionStage<Insets> bareInsets(Rectangle bounds) {
+        Frame bare = new Frame();
+        bare.setBounds(bounds);
+        bare.addNotify();
+        Insets guessed = bare.getInsets();
+        if (!io.quarkiverse.desktop.showcase.core.Platforms.isLinux()) {
+            bare.dispose();
+            return CompletableFuture.completedFuture(guessed);
+        }
+        bare.setFocusableWindowState(false);
+        bare.setAutoRequestFocus(false);
+        bare.setVisible(true);
+        return Edt.until(() -> bare.isShowing() && !bare.getInsets().equals(guessed), 2000, "frame extents")
+                .handle((v, error) -> {
+                    Insets insets = bare.getInsets();
+                    bare.dispose();
+                    return insets;
+                });
     }
 
     private static void pressShortcut(Component target, int modifiersEx, int keyCode) {
@@ -522,6 +543,10 @@ public class AwtMenusPage implements FeaturePage {
         int next = rtl ? KeyEvent.VK_LEFT : KeyEvent.VK_RIGHT;
         checks.add(Check.info("keyboard layout (menu bar direction on Windows)", AwtSupport.inputLocale()
                 + (rtl ? ", right to left" : ", left to right")));
+        // Windows : F10 selects the first menu of the bar, Down opens it on its first item. X11 (XMenuBarPeer) : F10
+        // opens the first menu on its first item, and the arrow keys open the next menu on its first item
+        boolean opensOnFirstItem = io.quarkiverse.desktop.showcase.core.Platforms.isLinux();
+        String open = opensOnFirstItem ? "F10" : "F10, Down";
         try (RobotSupport robot = RobotSupport.create()) {
             // the pointer away from the menus (a stationary pointer under a new menu highlights an item)
             robot.move(new Point(canvas.x + size.width - 8, canvas.y + size.height - 8));
@@ -529,19 +554,20 @@ public class AwtMenusPage implements FeaturePage {
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
 
-            boolean opened = robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN);
+            boolean opened = opensOnFirstItem ? robot.key(KeyEvent.VK_F10)
+                    : robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN);
             robot.delay(600);
             if (opened) {
                 BufferedImage file = robot.capture(frame);
                 images.put("file-menu", file);
-                checks.add(Checks.expect("F10, Down : the File menu opens (capture differs)", true,
+                checks.add(Checks.expect(open + " : the File menu opens (capture differs)", true,
                         () -> !Checks.sha256(file).equals(Checks.sha256(closed))));
                 if (robot.key(next) && robot.key(next)) {
                     robot.delay(600);
                     images.put("view-menu", robot.capture(frame));
                 }
             } else {
-                checks.add(Check.info("F10, Down : the File menu opens", "skipped: not focused"));
+                checks.add(Check.info(open + " : the File menu opens", "skipped: not focused"));
             }
             robot.key(KeyEvent.VK_ESCAPE);
             robot.key(KeyEvent.VK_ESCAPE);
@@ -549,16 +575,17 @@ public class AwtMenusPage implements FeaturePage {
 
             // activation from the native menu : the peer calls back into Java (handleAction)
             m.events.clear();
-            if (robot.key(KeyEvent.VK_F10) && robot.key(KeyEvent.VK_DOWN) && robot.key(KeyEvent.VK_ENTER)) {
+            if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))
+                    && robot.key(KeyEvent.VK_ENTER)) {
                 waitFor(robot, () -> !m.events.isEmpty());
-                checks.add(Checks.expect("F10, Down, Enter : native activation of File > New", "action New",
+                checks.add(Checks.expect(open + ", Enter : native activation of File > New", "action New",
                         () -> String.join(", ", m.events)));
             } else {
-                checks.add(Check.info("F10, Down, Enter : native activation of File > New", "skipped: not focused"));
+                checks.add(Check.info(open + ", Enter : native activation of File > New", "skipped: not focused"));
             }
             m.events.clear();
-            if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next) && robot.key(KeyEvent.VK_DOWN)
-                    && robot.key(KeyEvent.VK_ENTER)) {
+            if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next)
+                    && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN)) && robot.key(KeyEvent.VK_ENTER)) {
                 waitFor(robot, () -> !m.events.isEmpty());
                 checks.add(Checks.expect("native activation of View > Toolbar (CheckboxMenuItem)",
                         "item Toolbar DESELECTED, state false", () -> String.join(", ", m.events) + ", state "

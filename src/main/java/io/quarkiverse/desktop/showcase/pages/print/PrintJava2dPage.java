@@ -360,9 +360,12 @@ public class PrintJava2dPage implements FeaturePage {
                     return ps.pages() + ", " + ps.pageDevice();
                 }));
 
-        // 5. a page throwing a PrinterException : the exception reaches PrinterJob.print
+        // 5. a page throwing a PrinterException : the exception reaches PrinterJob.print. The PostScript printer job of
+        // Linux (PSPrinterJob) prints to the stream service itself, the other printer jobs spool to it
+        // (RasterPrinterJob.spoolToService : the exception wrapped in a javax.print.PrintException)
         checks.add(Checks.expect("PrinterJob.print() of a failing Printable",
-                "java.awt.print.PrinterException: javax.print.PrintException: java.awt.print.PrinterException: "
+                "java.awt.print.PrinterException: " + (Platforms.isLinux() ? ""
+                        : "javax.print.PrintException: java.awt.print.PrinterException: ")
                         + "simulated failure on page 2",
                 () -> {
                     PrinterJob job = PrinterJob.getPrinterJob();

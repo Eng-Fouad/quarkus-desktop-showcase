@@ -527,13 +527,14 @@ public class ChoosersPage implements FeaturePage {
                 + " " + fsv.isFloppyDrive(drive) + " " + fsv.isComputerNode(drive) + " " + fsv.isFileSystemRoot(drive)));
         checks.add(Checks.info("type description of notes.txt / Documents",
                 () -> fsv.getSystemTypeDescription(notes) + " / " + fsv.getSystemTypeDescription(documents)));
-        checks.add(Checks.expect("system icon sizes (default, 32, 48)", "16x16 32x32 48x48", () -> {
-            Icon small = fsv.getSystemIcon(notes);
-            Icon medium = fsv.getSystemIcon(notes, 32, 32);
-            Icon large = fsv.getSystemIcon(documents, 48, 48);
-            return small.getIconWidth() + "x" + small.getIconHeight() + " " + medium.getIconWidth() + "x"
-                    + medium.getIconHeight() + " " + large.getIconWidth() + "x" + large.getIconHeight();
-        }));
+        // Windows : the shell icons at the requested size. Linux : the shell folders have no icons, the file view icons
+        // of the look and feel are returned (FileSystemView.getSystemIcon), whatever the size
+        Check systemIcons = Checks.expect("system icon sizes (default, 32, 48)", Platforms.isWindows() ? "16x16 32x32 48x48"
+                : size(UIManager.getIcon("FileView.fileIcon")) + " " + size(UIManager.getIcon("FileView.fileIcon")) + " "
+                        + size(UIManager.getIcon("FileView.directoryIcon")),
+                () -> size(fsv.getSystemIcon(notes)) + " " + size(fsv.getSystemIcon(notes, 32, 32)) + " "
+                        + size(fsv.getSystemIcon(documents, 48, 48)));
+        checks.add(Platforms.isMac() ? Check.info(systemIcons.name(), systemIcons.value()) : systemIcons);
         checks.add(Checks.expect("getFiles (hiding), sorted", "Archive data.csv Documents notes.txt photo.png Pictures "
                 + "README.md", () -> sorted(fsv.getFiles(root, true))));
         checks.add(Checks.expect("getFiles (not hiding) count, .hidden hidden", "8 true",
@@ -545,9 +546,12 @@ public class ChoosersPage implements FeaturePage {
         checks.add(Checks.expect("isFileSystem, isLink, isRoot of the tree", "true false false",
                 () -> fsv.isFileSystem(notes) + " " + fsv.isLink(notes) + " " + fsv.isRoot(root)));
         checks.add(Checks.info("createNewFolder in Archive (then deleted)", () -> {
-            File folder = fsv.createNewFolder(new File(root, "Archive"));
+            File archive = new File(root, "Archive");
+            File folder = fsv.createNewFolder(archive);
             String name = folder.getName();
             Files.delete(folder.toPath());
+            // the folder's date back (Linux file systems date the change of a directory's entries)
+            Files.setLastModifiedTime(archive.toPath(), FileTime.fromMillis(MODIFIED));
             return name;
         }));
         // the combo box files also list the folders of the user's home : only their count and the first places
@@ -558,6 +562,10 @@ public class ChoosersPage implements FeaturePage {
         }));
         checks.add(Checks.info("chooser shortcut panel files", () -> names(fsv, fsv.getChooserShortcutPanelFiles())));
         return checks;
+    }
+
+    private static String size(Icon icon) {
+        return icon == null ? "null" : icon.getIconWidth() + "x" + icon.getIconHeight();
     }
 
     private static String names(FileSystemView fsv, File[] files) {
