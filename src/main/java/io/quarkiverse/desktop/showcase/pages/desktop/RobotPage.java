@@ -287,15 +287,16 @@ public class RobotPage implements FeaturePage {
         for (int i = 0; i < COLORS.length; i++) {
             int x = i * SQUARE + SQUARE / 2;
             expected.add(DesktopSupport.rgb(COLORS[i]));
-            captured.add(DesktopSupport.rgb(image.getRGB(x, SQUARE / 2)));
-            pixels.add(DesktopSupport.rgb(robot.getPixelColor(bounds.x + x, bounds.y + SQUARE / 2).getRGB()));
+            captured.add(DesktopSupport.rgb(RobotSession.snap(image.getRGB(x, SQUARE / 2), COLORS[i])));
+            pixels.add(DesktopSupport.rgb(
+                    RobotSession.snap(robot.getPixelColor(bounds.x + x, bounds.y + SQUARE / 2).getRGB(), COLORS[i])));
         }
         checks.add(Checks.expect("createScreenCapture: size", bounds.width + "x" + bounds.height,
                 () -> image.getWidth() + "x" + image.getHeight()));
         checks.add(Checks.expect("createScreenCapture: square colors", expected, () -> captured));
         checks.add(Checks.expect("getPixelColor: square colors", expected, () -> pixels));
         checks.add(Checks.expect("createScreenCapture: pixels equal the painted pattern", true,
-                () -> Checks.sha256(image).equals(Checks.sha256(pattern(bounds.width, bounds.height)))));
+                () -> RobotSession.sameImage(image, pattern(bounds.width, bounds.height))));
         MultiResolutionImage multi = robot.createMultiResolutionScreenCapture(bounds);
         checks.add(Checks.info("createMultiResolutionScreenCapture: variants", () -> {
             List<String> sizes = new ArrayList<>();

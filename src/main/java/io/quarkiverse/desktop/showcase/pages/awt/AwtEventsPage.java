@@ -855,7 +855,7 @@ public class AwtEventsPage implements FeaturePage {
             robot.waitForPixel(probe, CANVAS_COLOR, 3000);
             Color seen = robot.robot().getPixelColor(probe.x, probe.y);
             checks.add(Checks.expect("Robot.getPixelColor inside the canvas", Checks.argb(0xFF000000 | CANVAS_COLOR),
-                    () -> Checks.argb(seen.getRGB())));
+                    () -> Checks.argb(0xFF000000 | RobotSession.snap(seen.getRGB(), CANVAS_COLOR))));
             int attempt = 0;
             List<String> log;
             do {

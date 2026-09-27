@@ -377,6 +377,52 @@ public final class RobotSession implements AutoCloseable {
     // ---------------------------------------------------------------------------------------------------- screen
 
     /**
+     * The difference per channel that {@link #sameColor} accepts between a screen pixel read by Robot and the color the
+     * application painted there : 0, except on macOS, where Robot reads the screen through the color profile of the
+     * display (a pixel painted #37474F reads #36474F on the 3840x1080 display of the first macOS cycle).
+     */
+    public static final int COLOR_TOLERANCE = Platforms.isMac() ? 6 : 0;
+
+    /**
+     * {@code true} when the screen color {@code found} is the painted color {@code expected} (RGB), within
+     * {@link #COLOR_TOLERANCE}.
+     */
+    public static boolean sameColor(int found, int expected) {
+        for (int shift = 0; shift <= 16; shift += 8) {
+            if (Math.abs(((found >> shift) & 0xFF) - ((expected >> shift) & 0xFF)) > COLOR_TOLERANCE) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * {@code expected} when {@link #sameColor} accepts {@code found}, {@code found} otherwise (RGB) : the value of a check
+     * of a screen color, the same on every platform when the color is the expected one.
+     */
+    public static int snap(int found, int expected) {
+        return sameColor(found, expected) ? expected & 0xFFFFFF : found & 0xFFFFFF;
+    }
+
+    /**
+     * {@code true} when the two images have the same size and every pixel of {@code screen} is the one of
+     * {@code painted} within {@link #COLOR_TOLERANCE}.
+     */
+    public static boolean sameImage(BufferedImage screen, BufferedImage painted) {
+        if (screen.getWidth() != painted.getWidth() || screen.getHeight() != painted.getHeight()) {
+            return false;
+        }
+        for (int y = 0; y < screen.getHeight(); y++) {
+            for (int x = 0; x < screen.getWidth(); x++) {
+                if (!sameColor(screen.getRGB(x, y), painted.getRGB(x, y))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
      * The color of the screen pixel at {@code p} (RGB, no alpha).
      */
     public int pixel(Point p) {
@@ -388,7 +434,7 @@ public final class RobotSession implements AutoCloseable {
      * a click never lands on another window that happens to cover the target.
      */
     public boolean pixelIs(Point p, int rgb) {
-        boolean same = pixel(p) == (rgb & 0xFFFFFF);
+        boolean same = sameColor(pixel(p), rgb);
         if (!same) {
             skipped.add("click at a covered point");
         }
@@ -407,7 +453,7 @@ public final class RobotSession implements AutoCloseable {
      * @return {@code true} once the pixel has the color
      */
     public boolean waitForPixel(Point p, int rgb, long timeoutMillis) {
-        return waitForPixel(p, found -> found == (rgb & 0xFFFFFF), timeoutMillis);
+        return waitForPixel(p, found -> sameColor(found, rgb), timeoutMillis);
     }
 
     /**
@@ -478,7 +524,7 @@ public final class RobotSession implements AutoCloseable {
             boolean visible = true;
             for (var probe : probes.entrySet()) {
                 int found = pixel(probe.getKey());
-                if (found != (probe.getValue() & 0xFFFFFF)) {
+                if (!sameColor(found, probe.getValue())) {
                     visible = false;
                     lastMismatch = rgb(found) + " instead of " + rgb(probe.getValue()) + " at " + probe.getKey().x
                             + "," + probe.getKey().y;

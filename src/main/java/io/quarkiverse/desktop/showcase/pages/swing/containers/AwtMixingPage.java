@@ -428,9 +428,9 @@ public class AwtMixingPage implements FeaturePage {
         Robot robot = new Robot(gc.getDevice());
         long deadline = System.nanoTime() + millis * 1_000_000L;
         while (true) {
-            boolean ok = (robot.getPixelColor(reference.x, reference.y).getRGB() & 0xFFFFFF) == REFERENCE_TEAL
-                    && (robot.getPixelColor(canvas.x, canvas.y).getRGB() & 0xFFFFFF) == CANVAS_RED
-                    && (robot.getPixelColor(popup.x, popup.y).getRGB() & 0xFFFFFF) == POPUP_PURPLE;
+            boolean ok = RobotSession.sameColor(robot.getPixelColor(reference.x, reference.y).getRGB(), REFERENCE_TEAL)
+                    && RobotSession.sameColor(robot.getPixelColor(canvas.x, canvas.y).getRGB(), CANVAS_RED)
+                    && RobotSession.sameColor(robot.getPixelColor(popup.x, popup.y).getRGB(), POPUP_PURPLE);
             if (ok || System.nanoTime() > deadline || RobotSession.screenCaptureDenied()) {
                 return ok;
             }

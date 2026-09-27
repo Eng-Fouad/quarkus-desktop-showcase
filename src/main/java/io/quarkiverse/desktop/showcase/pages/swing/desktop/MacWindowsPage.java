@@ -120,9 +120,7 @@ public class MacWindowsPage implements FeaturePage {
                     return v instanceof File ? "a file" : v;
                 })));
         checks.add(Checks.expect("getClientProperty Window.style", "small", () -> root.getClientProperty("Window.style")));
-        checks.add(Checks.info("plain window insets", () -> insets(plain.getInsets())));
-        checks.add(Checks.info("styled window insets (full size content : top 0 expected)",
-                () -> insets(styled.getInsets())));
+        // the window insets are read in ready(), once stable
         checks.add(Checks.expect("styled window isResizable()", true, styled::isResizable));
         results = ChecksView.table("macOS window properties", checks, 380, ChecksView.WIDTH);
         return Ui.column(14, Ui.heading("macOS window properties"),
@@ -135,7 +133,21 @@ public class MacWindowsPage implements FeaturePage {
 
     @Override
     public CompletionStage<?> ready(Component content) {
-        return frames.isEmpty() ? CompletableFuture.completedFuture(null) : Edt.rounds(3);
+        if (frames.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        JFrame plain = frames.get(0);
+        JFrame styled = frames.get(1);
+        // CPlatformWindow applies the client properties to the native window on the AppKit thread, without waiting : the
+        // insets change a little later (full size content : top 0), read them once they no longer change
+        return Edt.untilStable(() -> insets(plain.getInsets()) + " / " + insets(styled.getInsets()), 300, 3000,
+                "stable window insets").handle((v, error) -> null).thenRun(() -> {
+                    List<Check> checks = new ArrayList<>(results.getChecks());
+                    checks.add(Checks.info("plain window insets", () -> insets(plain.getInsets())));
+                    checks.add(Checks.info("styled window insets (full size content : top 0 expected)",
+                            () -> insets(styled.getInsets())));
+                    results.setChecks(checks);
+                }).thenCompose(v -> Edt.rounds(3));
     }
 
     @Override

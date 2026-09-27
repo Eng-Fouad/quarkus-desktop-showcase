@@ -766,7 +766,7 @@ public class AwtMenusPage implements FeaturePage {
                     : !shower.isAlive() ? "closed" : "still open";
         } else {
             // read as the pixel before show() (not from the capture, scaled on HiDPI screens)
-            boolean shown = robot.pixel(probe) != before;
+            boolean shown = !RobotSession.sameColor(robot.pixel(probe), before);
             boolean gone;
             do {
                 attempt++;
