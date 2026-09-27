@@ -6,10 +6,12 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Desktop;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Image;
+import java.awt.KeyboardFocusManager;
 import java.awt.MenuItem;
 import java.awt.Point;
 import java.awt.PopupMenu;
@@ -180,6 +182,7 @@ public class DesktopServicesPage implements FeaturePage {
                         ? Edt.background(() -> trayInput(run))
                         : CompletableFuture.completedFuture(run))
                 .thenCompose(run -> Edt.supply(() -> trayRemove(run)))
+                .thenComposeAsync(checks -> trayFocusBack(window).thenApply(v -> checks), Edt.EDT)
                 .thenAccept(tray::setChecks);
     }
 
@@ -662,6 +665,34 @@ public class DesktopServicesPage implements FeaturePage {
             LOG.warnf("Ignored %s=%s : x,y expected", TRAY_ICON_ENV, value);
             return null;
         }
+    }
+
+    /**
+     * X11 : a tray that implements the focus messages of XEmbed (stalonetray) gives the Java focus to the embedded frame
+     * of the icon ({@code XTrayIconEmbeddedFrame}) when it embeds it, while the X focus stays on the showcase window :
+     * Java never gets the focus back, not even once the icon is removed, and the next pages that need the focus could not
+     * get it. A small dialog owned by the window, shown then disposed, makes the window manager focus the window again.
+     * Logged only : it depends on the tray of the desktop. On the EDT.
+     */
+    private static CompletionStage<Void> trayFocusBack(Window window) {
+        Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+        if (window == null || focused == null || !focused.getClass().getName().endsWith("XTrayIconEmbeddedFrame")) {
+            return CompletableFuture.completedFuture(null);
+        }
+        Dialog dialog = new Dialog(window);
+        dialog.setBounds(window.getX() + 40, window.getY() + 40, 160, 80);
+        dialog.setVisible(true);
+        return Edt.until(dialog::isFocused, 3000, "the focus of a dialog")
+                .handle((v, error) -> null)
+                .thenCompose(v -> {
+                    dialog.dispose();
+                    return Edt.until(window::isFocused, 3000, "the focus back from the tray icon frame");
+                })
+                .handle((v, error) -> {
+                    dialog.dispose();
+                    LOG.infof("Focus back from the tray icon frame : %s", error == null ? "focused" : "not focused");
+                    return null;
+                });
     }
 
     private List<Check> trayRemove(TrayRun run) {
