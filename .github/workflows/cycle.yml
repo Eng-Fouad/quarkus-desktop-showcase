@@ -101,11 +101,12 @@ jobs:
           cache-to: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && format('type=gha,mode=min,scope=showcase-linux-{0}', runner.arch) || '' }}
 
       # docker run, not a job container : the entry point of the image starts the X server, the window manager and the
-      # system tray. quarkus-desktop's own CI runs its tests : only installed here.
+      # system tray. quarkus-desktop's own CI runs its tests and checks its format : only installed here (without the
+      # format plugins, whose downloads are not needed).
       - name: Install quarkus-desktop
         run: |
           docker run --rm --init -v "$PWD/quarkus-desktop":/quarkus-desktop -w /quarkus-desktop \
-            -v "$HOME/.m2":/root/.m2 "$IMAGE" ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee install.log
+            -v "$HOME/.m2":/root/.m2 "$IMAGE" ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee install.log
 
       # Cycle.java exits 1 when a run fails, when --exact finds accesses missing from the metadata or when the runs do
       # not match ; --require-focus : a page that never got the focus fails (its Robot input was skipped)
@@ -251,7 +252,7 @@ jobs:
 
       - name: Install quarkus-desktop
         working-directory: quarkus-desktop
-        run: ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee ../install.log
+        run: ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee ../install.log
 
       - name: Cycle win
         working-directory: showcase
@@ -317,7 +318,7 @@ jobs:
 
       - name: Install quarkus-desktop
         working-directory: quarkus-desktop
-        run: ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee ../install.log
+        run: ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee ../install.log
 
       - name: Two JVM runs
         working-directory: showcase
