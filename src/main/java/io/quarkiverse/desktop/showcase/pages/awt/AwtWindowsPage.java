@@ -788,8 +788,8 @@ public class AwtWindowsPage implements FeaturePage {
      * display : 0.6 of #1565C0 over #DDE3EA is #6597D1 in sRGB, #759BD2 on a wide gamut display with a 1.96 gamma
      * profile (the value of that blend computed with its ICC profile). A non-opaque window (per-pixel translucency) also
      * casts its shadow (CPlatformWindow : HAS_SHADOW by default) under its own translucent pixels : the red band reads
-     * #CF8B8A there, #D59191 without the shadow. So on macOS the check is that the window is translucent : every
-     * channel between the window color and the backdrop, the color being neither of them.
+     * #CF8B8A there, #D59191 without the shadow. So on macOS the check is the alpha that the captured color implies
+     * ({@link #displayBlend}), not an exact color.
      */
     private static Check blend(String name, BufferedImage image, Rectangle area, Rectangle cell, int x, int y, int rgb,
             float alpha) {
@@ -812,22 +812,59 @@ public class AwtWindowsPage implements FeaturePage {
     }
 
     /**
-     * macOS : {@code rgb} blended over the backdrop in the color space of the display (see {@link #blend}).
+     * The channels of a macOS blend check : those where the window color and the backdrop differ by at least this many
+     * levels (with fewer, one level of rounding moves the implied alpha by more than 0.025).
+     */
+    private static final int DISPLAY_BLEND_MIN_CONTRAST = 40;
+
+    /**
+     * The difference between the alpha implied by a macOS blend and the alpha of the window. Blending in the display
+     * color space instead of sRGB moves the implied alpha. Computed with LCMS (both colors converted to the profile,
+     * blended there, converted back to sRGB) for the RGB profiles of macOS (Generic RGB : gamma 1.8, sRGB, Display P3,
+     * Adobe RGB, ITU-709, ITU-2020, DCI-P3 : gamma 2.6, ROMM RGB) and the display profiles of the Mac of the macOS
+     * cycles (HP, Samsung, Odyssey G93SD : #759AD2 and #D69191 computed, #759BD2 and #D59191 measured, the band without
+     * its shadow) : 0.46 to 0.60 for 0.6 over the backdrop, 0.42 to 0.50 for the red band at 0.5. The shadow under the
+     * band adds about 0.03 (0.47 / 0.49 measured, 0.44 / 0.46 without it). Only a linear (gamma 1.0) space would leave
+     * this band (0.37 / 0.31).
+     */
+    private static final double DISPLAY_BLEND_ALPHA_TOLERANCE = 0.15;
+
+    /**
+     * macOS : {@code rgb} blended over the backdrop in the color space of the display (see {@link #blend}). The captured
+     * color gives, per channel, the alpha {@code (actual - backdrop) / (color - backdrop)} : on the channels where both
+     * colors differ enough ({@link #DISPLAY_BLEND_MIN_CONTRAST}), it must be {@code alpha}
+     * {@link #DISPLAY_BLEND_ALPHA_TOLERANCE +-0.15}, and every channel must lie between both colors (Robot tolerance).
+     * The value gives the implied alpha and the captured color (#759BD2 and #CF8B8A on the display of the macOS cycles).
      */
     private static Check displayBlend(String name, int actual, int rgb, float alpha) {
         int tolerance = RobotSession.COLOR_TOLERANCE;
         boolean between = true;
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
         for (int shift = 16; shift >= 0; shift -= 8) {
             int c = (rgb >> shift) & 0xFF;
             int b = (BACKDROP >> shift) & 0xFF;
             int a = (actual >> shift) & 0xFF;
             between &= a >= Math.min(c, b) - tolerance && a <= Math.max(c, b) + tolerance;
+            if (Math.abs(c - b) >= DISPLAY_BLEND_MIN_CONTRAST) {
+                double implied = (a - b) / (double) (c - b);
+                min = Math.min(min, implied);
+                max = Math.max(max, implied);
+            }
         }
-        boolean ok = between && !RobotSession.sameColor(actual, rgb) && !RobotSession.sameColor(actual, BACKDROP);
-        return Check.of(name, ok, ok ? "blend of " + Checks.argb(0xFF000000 | rgb) + " at " + Checks.num(alpha, 2)
-                + " (display color space)"
-                : "expected a blend of " + Checks.argb(0xFF000000 | rgb) + " and " + Checks.argb(0xFF000000 | BACKDROP)
-                        + " but got " + Checks.argb(0xFF000000 | actual));
+        if (min > max) {
+            return Check.of(name, false, Checks.argb(0xFF000000 | rgb) + " is too close to the backdrop to imply an alpha");
+        }
+        String implied = min == max ? Checks.num(min, 2) : Checks.num(min, 2) + ".." + Checks.num(max, 2);
+        boolean ok = between && min >= alpha - DISPLAY_BLEND_ALPHA_TOLERANCE
+                && max <= alpha + DISPLAY_BLEND_ALPHA_TOLERANCE;
+        String expected = Checks.argb(0xFF000000 | rgb) + " at " + Checks.num(alpha, 2) + " +-"
+                + Checks.num(DISPLAY_BLEND_ALPHA_TOLERANCE, 2);
+        return Check.of(name, ok, ok ? "blend of " + expected + " (display color space) : "
+                + Checks.argb(0xFF000000 | actual) + ", alpha " + implied
+                : "expected a blend of " + expected + " over " + Checks.argb(0xFF000000 | BACKDROP) + " but got "
+                        + Checks.argb(0xFF000000 | actual) + " (alpha " + implied
+                        + (between ? "" : ", not between both colors") + ")");
     }
 
     @Override
