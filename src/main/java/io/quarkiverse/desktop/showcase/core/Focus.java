@@ -1,6 +1,7 @@
 package io.quarkiverse.desktop.showcase.core;
 
 import java.awt.AWTException;
+import java.awt.Desktop;
 import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.Insets;
@@ -37,12 +38,19 @@ import org.jboss.logging.Logger;
  * focus state is trusted and each attempt is {@code toFront} and {@code requestFocus}. On X11 they ask the window
  * manager to activate the window (_NET_ACTIVE_WINDOW) : the Docker window manager of the showcase has no mouse
  * bindings, a click would activate nothing there, and without a window manager a frame has no title bar at all. On
- * macOS, {@code Desktop.requestForeground} is the opt-in {@code dock} side effect : never called here.
+ * macOS, AWT never activates the application and rejects the focus requests of an inactive one : with
+ * {@code -Dshowcase.activate=true} (unattended runs only, such as CI : on a user's desktop it would take the focus from
+ * the active application), each attempt first activates the application ({@code Desktop.requestForeground}), and the
+ * later attempts click the title bar on macOS too (a mouse click activates the application), without the check of the
+ * window under the point that only Windows can make.
  * <p>
  * A window is also placed asynchronously : {@link #awaitPlaced} waits until its screen location is the requested one
  * (X11 confirms a location after the focus, sometimes) before Robot coordinates are computed from it.
  */
 public final class Focus {
+
+    /** Unattended runs (CI) : activate the application (macOS), click title bars there too (see the class comment). */
+    static final boolean ACTIVATE = Boolean.getBoolean("showcase.activate");
 
     /** Attempts of {@link #acquire}. */
     public static final int MAX_ATTEMPTS = 4;
@@ -100,6 +108,7 @@ public final class Focus {
                 if (!window.isShowing()) {
                     return false;
                 }
+                activate();
                 window.toFront();
                 window.requestFocus();
                 return true;
@@ -110,13 +119,31 @@ public final class Focus {
             if (await(() -> has(window), attempt == 1 ? 1500 : 1000)) {
                 return attempt;
             }
-            if (attempt < MAX_ATTEMPTS && Boolean.FALSE.equals(Foreground.thisProcess())) {
+            if (attempt < MAX_ATTEMPTS
+                    && (Boolean.FALSE.equals(Foreground.thisProcess()) || ACTIVATE && Platforms.isMac())) {
                 clickTitleBar(window);
             }
         }
         LOG.infof("Focus: %s not focused after %d attempts (foreground : %s)", title(window), MAX_ATTEMPTS,
                 Foreground.describe());
         return 0;
+    }
+
+    /**
+     * macOS with {@code -Dshowcase.activate=true} : activates the application, which AWT never does. Best effort.
+     */
+    private static void activate() {
+        if (!ACTIVATE || !Platforms.isMac()) {
+            return;
+        }
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_REQUEST_FOREGROUND)) {
+                Desktop.getDesktop().requestForeground(true);
+            }
+        } catch (RuntimeException | LinkageError e) {
+            // e.g. a registration missing from a native executable : the title bar click remains
+            LOG.infof("Focus: requestForeground failed : %s", e);
+        }
     }
 
     /**
@@ -143,14 +170,28 @@ public final class Focus {
                         // no title bar drawn around the window (no window manager) : the point would be in the page
                         continue;
                     }
-                    // the caption : below the top border, above the client area ; the middle has no button
-                    list.add(new Point(b.x + b.width / 2, b.y + Math.max(4, insets.top * 2 / 3)));
+                    // the caption : below the top border, above the client area. The middle first (no button there),
+                    // then right and left of it, away from the caption buttons and the icon : the window of another
+                    // process may cover the middle (the agent terminal of a CI runner)
+                    int y = b.y + Math.max(4, insets.top * 2 / 3);
+                    int middle = b.x + b.width / 2;
+                    list.add(new Point(middle, y));
+                    int right = Math.min(b.x + b.width * 3 / 4, b.x + b.width - 6 * insets.top);
+                    if (right > middle) {
+                        list.add(new Point(right, y));
+                    }
+                    int left = b.x + Math.max(b.width / 4, 3 * insets.top);
+                    if (left < middle) {
+                        list.add(new Point(left, y));
+                    }
                 }
             }
             return list;
         });
         for (Point p : points) {
-            if (Boolean.TRUE.equals(Foreground.thisProcessAt(p))) {
+            Boolean ours = Foreground.thisProcessAt(p);
+            // macOS (unattended runs only) : the window under the point is unknown, the first point is clicked
+            if (Boolean.TRUE.equals(ours) || ours == null && ACTIVATE && Platforms.isMac()) {
                 click(p);
                 LOG.infof("Focus: clicked the title bar of a showcase window at %d,%d to get the foreground for %s",
                         p.x, p.y, title(window));

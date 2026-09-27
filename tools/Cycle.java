@@ -11,8 +11,8 @@ import java.util.List;
  * comparison. Results: comparison/jvm-&lt;label&gt;, comparison/native-&lt;label&gt;, comparison/diff-&lt;label&gt;
  * (summary.txt, index.html), build logs in comparison/logs-&lt;label&gt;.
  * <p>
- * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--require-focus] [--skip-jvm] [--skip-native-build]
- * [--offline] [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] [--maven-args=a,b]
+ * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--require-focus] [--jvm-only] [--skip-jvm]
+ * [--skip-native-build] [--offline] [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] [--maven-args=a,b]
  * [--native-args=a,b] [-- snapshot options...]
  * <p>
  * --awt-only builds and runs the AWT only variant (mvn -Dawt-only, target/awt-only). --hidpi runs both snapshot runs
@@ -23,7 +23,9 @@ import java.util.List;
  * executable with -XX:MissingRegistrationReportingMode=Warn : the reflection, JNI and resource accesses missing from the
  * metadata are reported in the native run.log instead of failing silently or at the first one. --require-focus fails
  * the comparison when a page that needs the focus never got it (see tools/Compare.java : for unattended runs). Options
- * after {@code --} apply to both snapshot runs. The native build gets
+ * after {@code --} apply to both snapshot runs. --jvm-only compares two JVM runs (comparison/jvm-&lt;label&gt; and
+ * comparison/jvm2-&lt;label&gt;) instead of a JVM and a native run : the determinism of the pages on a platform without
+ * native-image (Windows on arm64), with the same exit codes. The native build gets
  * {@code -Dquarkus.native.native-image-xmx=8g} unless --maven-args sets it.
  * <p>
  * Exit code 0 when every step succeeded and the runs match ; 1 when a build failed, a snapshot run failed (no report, a
@@ -43,7 +45,7 @@ public class Cycle {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0 || args[0].startsWith("--")) {
-            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--require-focus] [--skip-jvm] "
+            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--require-focus] [--jvm-only] [--skip-jvm] "
                     + "[--skip-native-build] [--offline] [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] "
                     + "[--categories=names] [--maven-args=a,b] [--native-args=a,b] [-- snapshot options...]");
             System.exit(2);
@@ -56,6 +58,7 @@ public class Cycle {
         boolean skipNativeBuild = false;
         boolean offline = false;
         boolean exact = false;
+        boolean jvmOnly = false;
         String nativeArgs = null;
         List<String> mavenArgs = new ArrayList<>();
         Snapshot.Options snapshot = new Snapshot.Options();
@@ -78,6 +81,8 @@ public class Cycle {
                 exact = true;
             } else if (arg.equals("--require-focus")) {
                 requireFocus = true;
+            } else if (arg.equals("--jvm-only")) {
+                jvmOnly = true;
             } else if (arg.equals("--awt-only")) {
                 snapshot.awtOnly = true;
             } else if (arg.equals("--hidpi")) {
@@ -96,6 +101,12 @@ public class Cycle {
                 System.err.println("Unknown option " + arg);
                 System.exit(2);
             }
+        }
+        if (jvmOnly && (trace || exact || skipJvm || skipNativeBuild || nativeArgs != null)) {
+            // --trace : a JDK without native-image (Windows on arm64) has no tracing agent either
+            System.err.println("--jvm-only compares two JVM runs : not with --trace, --exact, --skip-jvm, "
+                    + "--skip-native-build or --native-args");
+            System.exit(2);
         }
         if (snapshot.awtOnly) {
             mavenArgs.add("-Dawt-only");
@@ -139,7 +150,16 @@ public class Cycle {
             }
         }
 
-        if (!skipNativeBuild) {
+        // the run compared with the JVM snapshots : the native executable, or a second JVM run (--jvm-only)
+        String second = (jvmOnly ? "jvm2-" : "native-") + label;
+        if (jvmOnly) {
+            step("second JVM snapshots");
+            if (Snapshot.run("jvm", second, snapshot) != 0) {
+                failures.add("second JVM snapshots (comparison/" + second + "/run.log)");
+            }
+        }
+
+        if (!skipNativeBuild && !jvmOnly) {
             step("native build");
             List<String> build = new ArrayList<>(List.of("-B", "package", "-Dnative", "-DskipTests"));
             if (mavenArgs.stream().noneMatch(a -> a.startsWith("-Dquarkus.native.native-image-xmx="))) {
@@ -170,13 +190,15 @@ public class Cycle {
             }
         }
 
-        step("native snapshots");
-        if (exact) {
-            // report every access missing from the metadata instead of failing at the first one
-            snapshot.nativeOptions.add("-XX:MissingRegistrationReportingMode=Warn");
-        }
-        if (Snapshot.run("native", "native-" + label, snapshot) != 0) {
-            failures.add("native snapshots (comparison/native-" + label + "/run.log)");
+        if (!jvmOnly) {
+            step("native snapshots");
+            if (exact) {
+                // report every access missing from the metadata instead of failing at the first one
+                snapshot.nativeOptions.add("-XX:MissingRegistrationReportingMode=Warn");
+            }
+            if (Snapshot.run("native", second, snapshot) != 0) {
+                failures.add("native snapshots (comparison/" + second + "/run.log)");
+            }
         }
         if (exact) {
             long missing = Snapshot.missingMetadata(Path.of("comparison", "native-" + label, "run.log"));
@@ -189,7 +211,7 @@ public class Cycle {
         step("compare");
         Path summary = logs.resolve("compare.txt");
         List<String> compare = new ArrayList<>(List.of("tools/Compare.java", "comparison/jvm-" + label,
-                "comparison/native-" + label, "comparison/diff-" + label));
+                "comparison/" + second, "comparison/diff-" + label));
         if (requireFocus) {
             compare.add("--require-focus");
         }
