@@ -25,6 +25,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.desktop.AppForegroundEvent;
 import java.awt.desktop.AppForegroundListener;
 import java.awt.desktop.QuitStrategy;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.inject.Singleton;
@@ -116,6 +118,15 @@ public class DesktopServicesPage implements FeaturePage {
     @Override
     public int order() {
         return 30;
+    }
+
+    /**
+     * {@code true} when the environment says where the tray icon is ({@link #TRAY_ICON_ENV}, Linux) : the page clicks
+     * the icon with Robot, real mouse events that snapshot mode only dispatches to the pages that need the focus.
+     */
+    @Override
+    public boolean needsFocus() {
+        return trayIconPoint() != null;
     }
 
     @Override
@@ -470,7 +481,7 @@ public class DesktopServicesPage implements FeaturePage {
      * removed by {@link #trayRemove}.
      */
     private record TrayRun(List<Check> checks, SystemTray tray, TrayIcon icon, AtomicInteger changes,
-            PropertyChangeListener listener, List<String> events) {
+            PropertyChangeListener listener, List<String> events, AtomicBoolean moved) {
     }
 
     private TrayRun trayChecks() {
@@ -482,7 +493,7 @@ public class DesktopServicesPage implements FeaturePage {
         if (!supported) {
             checks.add(DesktopSupport.expectThrows("SystemTray.getSystemTray()", UnsupportedOperationException.class,
                     SystemTray::getSystemTray));
-            return new TrayRun(checks, null, null, null, null, null);
+            return new TrayRun(checks, null, null, null, null, null, null);
         }
         SystemTray tray = SystemTray.getSystemTray();
         checks.add(Checks.info("getTrayIconSize()", () -> tray.getTrayIconSize().width + "x"
@@ -491,6 +502,7 @@ public class DesktopServicesPage implements FeaturePage {
         PropertyChangeListener listener = e -> changes.incrementAndGet();
         tray.addPropertyChangeListener("trayIcons", listener);
         List<String> events = Collections.synchronizedList(new ArrayList<>());
+        AtomicBoolean moved = new AtomicBoolean();
         try {
             PopupMenu popup = new PopupMenu("Showcase");
             popup.add(new MenuItem("Show the showcase"));
@@ -517,6 +529,13 @@ public class DesktopServicesPage implements FeaturePage {
                     trayEvent(events, "clicked b" + e.getButton() + " x" + e.getClickCount());
                 }
             });
+            // the icon is under the pointer once the tray embedded it (the pointer moves are not logged)
+            icon.addMouseMotionListener(new MouseMotionAdapter() {
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    moved.set(true);
+                }
+            });
             checks.add(Checks.expect("TrayIcon properties", "Quarkus Desktop Showcase true showcase-tray 3",
                     () -> icon.getToolTip() + " " + icon.isImageAutoSize() + " " + icon.getActionCommand() + " "
                             + icon.getPopupMenu().getItemCount()));
@@ -535,11 +554,11 @@ public class DesktopServicesPage implements FeaturePage {
                 icon.setImage(trayImage());
                 return "updated";
             }));
-            return new TrayRun(checks, tray, icon, changes, listener, events);
+            return new TrayRun(checks, tray, icon, changes, listener, events, moved);
         } catch (RuntimeException e) {
             tray.removePropertyChangeListener("trayIcons", listener);
             checks.add(Check.fail("SystemTray", Checks.describe(e)));
-            return new TrayRun(checks, null, null, null, null, null);
+            return new TrayRun(checks, null, null, null, null, null, null);
         }
     }
 
@@ -561,8 +580,16 @@ public class DesktopServicesPage implements FeaturePage {
         Point pointer = java.awt.MouseInfo.getPointerInfo().getLocation();
         int interval = multiClickInterval();
         try {
+            // the tray embeds the icon asynchronously (XEmbed) : wait until the icon sees the pointer move over it
+            long end = System.nanoTime() + 5_000_000_000L;
+            for (int i = 0; !run.moved().get() && System.nanoTime() - end < 0; i++) {
+                robot.mouseMove(point.x + (i % 2 == 0 ? 1 : -1), point.y);
+                RobotSession.waitForIdle(robot);
+                robot.delay(100);
+            }
             robot.mouseMove(point.x, point.y);
             RobotSession.waitForIdle(robot);
+            run.checks().add(Checks.expect("TrayIcon under the pointer (MOUSE_MOVED)", true, run.moved()::get));
             run.checks().add(Checks.expect("TrayIcon click (Robot, the tray of the environment)",
                     "pressed b1, released b1, action showcase-tray, clicked b1 x1",
                     () -> trayEvents(run, robot, () -> click(robot, InputEvent.BUTTON1_DOWN_MASK))));
@@ -579,11 +606,17 @@ public class DesktopServicesPage implements FeaturePage {
             run.checks().add(Checks.expect("TrayIcon popup button (Robot)",
                     "pressed b3 popup trigger, released b3, clicked b3 x1",
                     () -> trayEvents(run, robot, () -> click(robot, InputEvent.BUTTON3_DOWN_MASK))));
-            // the popup menu has the keyboard (a grab of this process) : Escape closes it
-            robot.keyPress(KeyEvent.VK_ESCAPE);
-            robot.keyRelease(KeyEvent.VK_ESCAPE);
-            RobotSession.waitForIdle(robot);
-            DesktopSupport.sleep(interval + 200);
+            // the popup menu has the keyboard (a grab of this process) : Escape closes it, no key press without it
+            boolean popup;
+            synchronized (run.events()) {
+                popup = run.events().stream().anyMatch(e -> e.endsWith("popup trigger"));
+            }
+            if (popup) {
+                robot.keyPress(KeyEvent.VK_ESCAPE);
+                robot.keyRelease(KeyEvent.VK_ESCAPE);
+                RobotSession.waitForIdle(robot);
+                DesktopSupport.sleep(interval + 200);
+            }
         } finally {
             robot.mouseMove(pointer.x, pointer.y);
         }

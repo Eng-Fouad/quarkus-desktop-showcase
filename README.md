@@ -175,7 +175,12 @@ fonts (DejaVu, Liberation, Noto, Noto CJK and Noto Color Emoji), `xclip` (the fo
 adds `-Duser.language=en -Duser.country=US`). The window manager keeps the always-on-top windows of the pages above the
 others and activates the windows they bring to the front, as on a Linux desktop; the compositing manager renders the
 translucent windows (AWT reports window opacity as supported whenever the window manager supports it).
-`SHOWCASE_WM=none` runs a bare X server, `SHOWCASE_COMPOSITOR=none` leaves the compositing manager out.
+`SHOWCASE_WM=none` runs a bare X server, `SHOWCASE_COMPOSITOR=none` leaves the compositing manager out. A system tray
+(`stalonetray`, in the upper right corner) owns the `_NET_SYSTEM_TRAY` selection, so `SystemTray.isSupported()` is true:
+the image sets `SHOWCASE_TRAY_ICON` to the point of its first icon, and `desktop-services` then clicks its tray icon with
+Robot (a click, a double click, the popup button) and checks the events of the icon; the page needs the focus there, the
+mouse events of the other pages are dropped in snapshot mode. `SHOWCASE_TRAY=none` leaves the tray out (no tray
+support, as on a desktop without one).
 
 The container has a Maven repository of its own (a Docker volume): quarkus-desktop is built and installed there first,
 with its tests (the native integration tests run on the virtual display).
@@ -371,7 +376,7 @@ and a native executable (reported as `EXPECTED`).
 | Data Transfer & Desktop | `dt-clipboard` | Clipboard | `pages.datatransfer.ClipboardPage` | 76 | 0 | yes |  |
 | Data Transfer & Desktop | `dt-dnd` | Drag and drop (AWT) | `pages.datatransfer.DragAndDropPage` | 31 | 0 | yes | focus |
 | Data Transfer & Desktop | `dt-dnd-swing` | Drag and drop (Swing) | `pages.swing.desktop.SwingDragAndDropPage` | 36 | 0 |  | focus |
-| Data Transfer & Desktop | `desktop-services` | Desktop, Taskbar, SystemTray and cursors | `pages.desktop.DesktopServicesPage` | 59 | 0 | yes |  |
+| Data Transfer & Desktop | `desktop-services` | Desktop, Taskbar, SystemTray and cursors | `pages.desktop.DesktopServicesPage` | 59 | 0 | yes | The events of the tray icon are logged in interactive mode (click the icon); in the Linux image, Robot clicks it |
 | Data Transfer & Desktop | `desktop-robot` | Robot | `pages.desktop.RobotPage` | 30 | 1 | yes | focus |
 | Data Transfer & Desktop | `desktop-screens-hidpi` | Screens and HiDPI | `pages.desktop.ScreensHiDpiPage` | 48 | 0 | yes |  |
 | Data Transfer & Desktop | `desktop-input-methods` | Input methods (AWT) | `pages.desktop.InputMethodsPage` | 28 | 1 | yes |  |
