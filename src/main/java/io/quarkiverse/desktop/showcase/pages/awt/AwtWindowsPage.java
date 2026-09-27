@@ -738,19 +738,21 @@ public class AwtWindowsPage implements FeaturePage {
         // setShape : outside the rounded corner the backdrop, inside the window color
         checks.add(near("setShape(RoundRectangle2D) : outside the corner", BACKDROP, image, area, cell(area, 7), 22, 22, 3));
         checks.add(Checks.expect("setShape(RoundRectangle2D) : inside", Checks.argb(0xFF000000 | SHAPE_COLOR),
-                () -> pixel(image, area, cell(area, 7), 30, 60)));
+                () -> pixel(image, area, cell(area, 7), 30, 60, SHAPE_COLOR)));
         checks.add(near("setShape(Ellipse2D) : outside the ellipse", BACKDROP, image, area, cell(area, 8), 24, 24, 3));
         // per-pixel translucency
         checks.add(Checks.expect("per-pixel translucency : transparent area / opaque circle",
                 Checks.argb(0xFF000000 | BACKDROP) + " / " + Checks.argb(0xFF000000 | OPAQUE_CIRCLE),
-                () -> pixel(image, area, cell(area, 9), 40, 40) + " / " + pixel(image, area, cell(area, 9), 260, 110)));
+                () -> pixel(image, area, cell(area, 9), 40, 40, BACKDROP) + " / "
+                        + pixel(image, area, cell(area, 9), 260, 110, OPAQUE_CIRCLE)));
         checks.add(blend("per-pixel translucency : 50 % red band", image, area, cell(area, 9), 60, 120, TRANSLUCENT_RED,
                 128 / 255f));
         // mixing : the lightweight circle is visible through the cut-out of the heavyweight button
         checks.add(Checks.expect("mixing : lightweight above the button, default cut-out (center)",
-                Checks.argb(0xFF000000 | CUTOUT_COLOR), () -> pixel(image, area, cell(area, 10), 20 + 85, 20 + 95)));
+                Checks.argb(0xFF000000 | CUTOUT_COLOR),
+                () -> pixel(image, area, cell(area, 10), 20 + 85, 20 + 95, CUTOUT_COLOR)));
         checks.add(Checks.expect("mixing : lightweight with an empty cut-out shape stays hidden", true,
-                () -> !pixel(image, area, cell(area, 10), 20 + 215, 20 + 95).equals(Checks.argb(0xFF000000 | HIDDEN_COLOR))));
+                () -> !RobotSession.sameColor(rgb(image, area, cell(area, 10), 20 + 215, 20 + 95), HIDDEN_COLOR)));
         return checks;
     }
 
@@ -765,15 +767,35 @@ public class AwtWindowsPage implements FeaturePage {
                 : "expected about " + Checks.argb(0xFF000000 | rgb) + " but got " + Checks.argb(actual));
     }
 
-    private static String pixel(BufferedImage image, Rectangle area, Rectangle cell, int x, int y) {
-        return Checks.argb(image.getRGB(cell.x - area.x + x, cell.y - area.y + y));
+    private static int rgb(BufferedImage image, Rectangle area, Rectangle cell, int x, int y) {
+        return image.getRGB(cell.x - area.x + x, cell.y - area.y + y);
+    }
+
+    /**
+     * The captured color at {@code x, y} of a cell, {@code expected} when it is within the color tolerance of Robot
+     * ({@link RobotSession#snap} : macOS reads the screen through the display color profile, #2E7D32 reads #2B7E33).
+     */
+    private static String pixel(BufferedImage image, Rectangle area, Rectangle cell, int x, int y, int expected) {
+        return Checks.argb(0xFF000000 | RobotSession.snap(rgb(image, area, cell, x, y), expected));
     }
 
     /**
      * {@code rgb} with {@code alpha} over the backdrop, within 4 levels per channel (composition rounding).
+     * <p>
+     * macOS : the window server composites the windows in the color space of the display, not in sRGB : the colors of
+     * both windows are converted to the display profile, blended there, and Robot converts the result back to sRGB
+     * (every pixel it reads goes through the profile, {@link RobotSession#COLOR_TOLERANCE}). The blend depends on the
+     * display : 0.6 of #1565C0 over #DDE3EA is #6597D1 in sRGB, #759BD2 on a wide gamut display with a 1.96 gamma
+     * profile (the value of that blend computed with its ICC profile). A non-opaque window (per-pixel translucency) also
+     * casts its shadow (CPlatformWindow : HAS_SHADOW by default) under its own translucent pixels : the red band reads
+     * #CF8B8A there, #D59191 without the shadow. So on macOS the check is that the window is translucent : every
+     * channel between the window color and the backdrop, the color being neither of them.
      */
     private static Check blend(String name, BufferedImage image, Rectangle area, Rectangle cell, int x, int y, int rgb,
             float alpha) {
+        if (Platforms.isMac()) {
+            return displayBlend(name, rgb(image, area, cell, x, y), rgb, alpha);
+        }
         int expected = 0xFF000000;
         for (int shift = 16; shift >= 0; shift -= 8) {
             int c = (rgb >> shift) & 0xFF;
@@ -787,6 +809,25 @@ public class AwtWindowsPage implements FeaturePage {
         }
         return Check.of(name, ok, ok ? "blend of " + Checks.argb(0xFF000000 | rgb) + " at " + Checks.num(alpha, 2) + " (+-4)"
                 : "expected about " + Checks.argb(expected) + " but got " + Checks.argb(actual));
+    }
+
+    /**
+     * macOS : {@code rgb} blended over the backdrop in the color space of the display (see {@link #blend}).
+     */
+    private static Check displayBlend(String name, int actual, int rgb, float alpha) {
+        int tolerance = RobotSession.COLOR_TOLERANCE;
+        boolean between = true;
+        for (int shift = 16; shift >= 0; shift -= 8) {
+            int c = (rgb >> shift) & 0xFF;
+            int b = (BACKDROP >> shift) & 0xFF;
+            int a = (actual >> shift) & 0xFF;
+            between &= a >= Math.min(c, b) - tolerance && a <= Math.max(c, b) + tolerance;
+        }
+        boolean ok = between && !RobotSession.sameColor(actual, rgb) && !RobotSession.sameColor(actual, BACKDROP);
+        return Check.of(name, ok, ok ? "blend of " + Checks.argb(0xFF000000 | rgb) + " at " + Checks.num(alpha, 2)
+                + " (display color space)"
+                : "expected a blend of " + Checks.argb(0xFF000000 | rgb) + " and " + Checks.argb(0xFF000000 | BACKDROP)
+                        + " but got " + Checks.argb(0xFF000000 | actual));
     }
 
     @Override
