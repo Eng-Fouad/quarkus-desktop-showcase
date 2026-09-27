@@ -26,7 +26,6 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Window;
-import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
@@ -72,6 +71,7 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -476,7 +476,16 @@ public class SwingContainersPage implements FeaturePage {
                         row(24, captioned("WRAP_TAB_LAYOUT, Uranus selected", s.wrapTabs),
                                 captioned("SCROLL_TAB_LAYOUT, Neptune selected", s.scrollTabs)),
                         row(24, captioned("tab components (JLabel + close button)", s.componentTabs),
-                                captioned("mnemonics, selected by actions and a synthetic alt+E", s.mnemonicTabs))));
+                                captioned("mnemonics, selected by actions and a synthetic " + mnemonicText("E"),
+                                        s.mnemonicTabs))));
+    }
+
+    /**
+     * A mnemonic key with the mnemonic modifiers of the platform, as in the names of the checks : {@code alt+E}, or
+     * {@code ctrl+alt+E} on macOS ({@link Keys#mnemonicStrokePrefix()}).
+     */
+    private static String mnemonicText(String key) {
+        return Keys.mnemonicStrokePrefix().trim().replace(' ', '+') + "+" + key;
     }
 
     private static List<Check> tabChecks(State s) {
@@ -543,8 +552,11 @@ public class SwingContainersPage implements FeaturePage {
         JTabbedPane m = s.mnemonicTabs;
         checks.add(Checks.expect("mnemonics: mnemonic / displayed index of Delta", "68 / 2",
                 () -> m.getMnemonicAt(3) + " / " + m.getDisplayedMnemonicIndexAt(3)));
-        checks.add(Checks.expect("mnemonics: binding alt B (in focused window)", "setSelectedIndex",
-                () -> m.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(KeyStroke.getKeyStroke("alt B"))));
+        // BasicTabbedPaneUI.addMnemonic binds the mnemonic with BasicLookAndFeel.getFocusAcceleratorKeyMask() :
+        // SunToolkit.getFocusAcceleratorKeyMask() is ALT_MASK, LWCToolkit (macOS) overrides it with CTRL_MASK | ALT_MASK
+        String mnemonicB = Keys.mnemonicStrokePrefix() + "B";
+        checks.add(Checks.expect("mnemonics: binding " + mnemonicB + " (in focused window)", "setSelectedIndex",
+                () -> m.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(KeyStroke.getKeyStroke(mnemonicB))));
         checks.add(Checks.expect("mnemonics: action setSelectedIndex with command d", 3, () -> {
             SwingKit.perform(m, "setSelectedIndex", "d");
             return m.getSelectedIndex();
@@ -553,8 +565,8 @@ public class SwingContainersPage implements FeaturePage {
             SwingKit.perform(m, "setSelectedIndex", "c");
             return m.getSelectedIndex();
         }));
-        checks.add(Checks.expect("mnemonics: synthetic alt+E key press", 4, () -> {
-            SwingKit.key(m, InputEvent.ALT_DOWN_MASK, KeyEvent.VK_E, 'e');
+        checks.add(Checks.expect("mnemonics: synthetic " + mnemonicText("E") + " key press", 4, () -> {
+            SwingKit.key(m, Keys.mnemonicMaskEx(), KeyEvent.VK_E, 'e');
             return m.getSelectedIndex();
         }));
         return checks;

@@ -29,6 +29,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
@@ -82,6 +83,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -94,8 +96,13 @@ import io.quarkiverse.desktop.showcase.core.Ui;
  * action maps of 21 UI classes are loaded lazily through reflection : {@code LazyActionMap} calls their
  * {@code loadActionMap} methods), {@link KeyStroke#getKeyStroke(String)} (reflection on the {@code VK_} fields of
  * {@link KeyEvent}, also used by every look and feel input map)
- * and its {@code toString()} round trip, {@link KeyEvent#getKeyText(int)} (bundle {@code sun.awt.resources.awt}),
- * extended key codes.
+ * and its {@code toString()} round trip, {@link KeyEvent#getKeyText(int)} (bundle {@code sun.awt.resources.awt},
+ * {@code sun.awt.resources.awtosx} first on macOS), extended key codes.
+ * <p>
+ * The mnemonics are pressed with the mnemonic modifiers of the platform ({@link Keys#mnemonicMaskEx()}) : Alt, or
+ * Ctrl+Option on macOS, where {@code LWCToolkit.getFocusAcceleratorKeyMask()} ({@code CTRL_MASK | ALT_MASK}) replaces
+ * the {@code ALT_MASK} of {@code SunToolkit} in the mnemonic bindings of Swing (buttons, labels, menus, tabs). The
+ * accelerators and the other bindings are the Ctrl bindings of the page and of Metal, the same on every platform.
  * <p>
  * Synthetic key events are dispatched with {@code Component.dispatchEvent} (never dropped, no focus needed). The page
  * needs the focus for two parts : a label mnemonic moving the focus, and real key presses typed with {@link Robot}
@@ -554,10 +561,11 @@ public class SwingKeyBindingsPage implements FeaturePage {
                     "KeyEventDispatcher consumed ctrl shift I", () -> stroke(f, KeyEvent.VK_I, CTRL_SHIFT)));
             checks.add(step(u, "F11 : unbound, seen by a KeyEventPostProcessor", "KeyEventPostProcessor unconsumed F11",
                     () -> stroke(f, KeyEvent.VK_F11, 0)));
-            checks.add(step(u, "alt K : button mnemonic (pressed, released)", "button Keep ActionEvent",
-                    () -> stroke(f, KeyEvent.VK_K, InputEvent.ALT_DOWN_MASK)));
-            checks.add(step(u, "alt J : check box mnemonic", "check box Bold selected true",
-                    () -> stroke(f, KeyEvent.VK_J, InputEvent.ALT_DOWN_MASK)));
+            // BasicButtonListener.updateMnemonicBinding : pressed / released with getFocusAcceleratorKeyMask()
+            checks.add(step(u, Keys.mnemonicStrokePrefix() + "K : button mnemonic (pressed, released)",
+                    "button Keep ActionEvent", () -> stroke(f, KeyEvent.VK_K, Keys.mnemonicMaskEx())));
+            checks.add(step(u, Keys.mnemonicStrokePrefix() + "J : check box mnemonic", "check box Bold selected true",
+                    () -> stroke(f, KeyEvent.VK_J, Keys.mnemonicMaskEx())));
             checks.add(step(u, "ctrl shift N : menu item accelerator (KeyboardManager)", "menu New (accelerator)",
                     () -> stroke(f, KeyEvent.VK_N, CTRL_SHIFT)));
             checks.add(step(u, "ctrl shift P : menu item accelerator from a string", "menu Open (accelerator)",
@@ -646,11 +654,15 @@ public class SwingKeyBindingsPage implements FeaturePage {
 
     // ------------------------------------------------------------------------------------------------ focus, Robot
 
+    /** The name of the label mnemonic check : alt M, ctrl alt M on macOS. */
+    private static final String LABEL_MNEMONIC = Keys.mnemonicStrokePrefix()
+            + "M : label mnemonic moves the focus to its labelFor";
+
     private CompletionStage<Void> focusPhase(Demo u, List<Check> checks) {
         // the page window focused, this process owning the foreground
         return Focus.acquire(SwingUtilities.getWindowAncestor(u.nameField)).thenCompose(attempts -> {
             if (attempts == 0) {
-                checks.add(Check.info("alt M : label mnemonic moves the focus to its labelFor", "skipped: not focused"));
+                checks.add(Check.info(LABEL_MNEMONIC, "skipped: not focused"));
                 checks.add(Check.info("Robot typing", "skipped: not focused"));
                 return CompletableFuture.completedFuture(null);
             }
@@ -660,15 +672,16 @@ public class SwingKeyBindingsPage implements FeaturePage {
 
     private CompletionStage<Void> focusedPhase(Demo u, List<Check> checks) {
         // label mnemonic : pressed alt M (window binding) focuses the label, released alt M (on the label) focuses the
-        // labelFor component
-        press(u.nameField, KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK);
+        // labelFor component ; ctrl alt M on macOS (BasicLabelUI binds "press" and, on the focused label, "release"
+        // with BasicLookAndFeel.getFocusAcceleratorKeyMask())
+        press(u.nameField, KeyEvent.VK_M, Keys.mnemonicMaskEx());
         return Edt.until(u.nameLabel::isFocusOwner, 2000, "label focused")
                 .thenCompose(v -> {
-                    release(u.nameLabel, KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK);
+                    release(u.nameLabel, KeyEvent.VK_M, Keys.mnemonicMaskEx());
                     return Edt.until(u.otherField::isFocusOwner, 2000, "labelFor focused");
                 })
                 .handle((v, error) -> {
-                    String name = "alt M : label mnemonic moves the focus to its labelFor";
+                    String name = LABEL_MNEMONIC;
                     if (error == null) {
                         checks.add(Check.pass(name, "labelFor focused"));
                         // notify-field-accept acts on the focused text field
@@ -679,7 +692,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                         checks.add(Edt.ownsFocus() ? Check.fail(name, Checks.describe(unwrap(error)))
                                 : Check.info(name, "skipped: not focused"));
                         // the key must not stay pressed in the Swing KeyboardState
-                        release(u.nameField, KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK);
+                        release(u.nameField, KeyEvent.VK_M, Keys.mnemonicMaskEx());
                     }
                     return null;
                 })
@@ -739,8 +752,12 @@ public class SwingKeyBindingsPage implements FeaturePage {
                     }
                     List<KeyEvent> pressed = new ArrayList<>(u.robotPressed);
                     checks.add(Check.pass(name, pressed.size() + " key presses"));
+                    // informational on macOS too when it differs : CRobot presses the key at the position of the US
+                    // layout (kVK_ANSI_Q) and AWTEvent.m derives the key code of a letter from the character that the
+                    // current keyboard layout gives there (Q on QWERTY, A on AZERTY) ; the names are those of awtosx
                     checks.add(Checks.onlyOn(Platforms.Os.WINDOWS, Checks.expect("Robot KEY_PRESSED key texts",
-                            "Shift Q U A R K U S Space 2 5 Shift Q",
+                            Stream.of("Shift", "Q", "U", "A", "R", "K", "U", "S", "Space", "2", "5", "Shift", "Q")
+                                    .map(Keys::text).collect(Collectors.joining(" ")),
                             () -> pressed.stream().map(e -> KeyEvent.getKeyText(e.getKeyCode()))
                                     .collect(Collectors.joining(" ")))));
                     checks.add(Check.info("Robot KEY_TYPED characters (keyboard layout)", u.robotTyped.toString()));
@@ -752,7 +769,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                     checks.add(Checks.info("Robot key locations", () -> pressed.stream()
                             .map(e -> Integer.toString(e.getKeyLocation())).collect(Collectors.joining(" "))));
                     checks.add(Checks.onlyOn(Platforms.Os.WINDOWS, Checks.expect("Robot shifted Q : modifiersEx text",
-                            "Shift", () -> InputEvent.getModifiersExText(pressed.get(pressed.size() - 1)
+                            Keys.text("Shift"), () -> InputEvent.getModifiersExText(pressed.get(pressed.size() - 1)
                                     .getModifiersEx()))));
                     checks.add(Checks.expect("Robot KeyStroke.getKeyStrokeForEvent(second press)", "pressed Q",
                             () -> KeyStroke.getKeyStrokeForEvent(pressed.get(1)).toString()));
@@ -941,9 +958,11 @@ public class SwingKeyBindingsPage implements FeaturePage {
 
     private static List<Check> keyNameChecks() {
         List<Check> checks = new ArrayList<>();
-        // Toolkit.getProperty(key, default) returns the default when the bundle sun.awt.resources.awt is missing
-        checks.add(InfraSupport.notOnMac(Checks.expect("Toolkit.getProperty(\"AWT.control\") (awt bundle)", "Ctrl",
-                () -> Toolkit.getProperty("AWT.control", "<missing>"))));
+        // Toolkit.getProperty(key, default) returns the default when the bundle sun.awt.resources.awt is missing ;
+        // on macOS it reads first the platform resources that LWCToolkit sets : the bundle sun.awt.resources.awtosx,
+        // whose names are symbols (AWT.control ⌃, AWT.enter ⏎...) : Keys.text gives them
+        checks.add(Checks.expect("Toolkit.getProperty(\"AWT.control\") (awt bundle)", Keys.text("Ctrl"),
+                () -> Toolkit.getProperty("AWT.control", "<missing>")));
         Object[][] keys = {
                 { KeyEvent.VK_ENTER, "Enter" }, { KeyEvent.VK_BACK_SPACE, "Backspace" }, { KeyEvent.VK_TAB, "Tab" },
                 { KeyEvent.VK_ESCAPE, "Escape" }, { KeyEvent.VK_SPACE, "Space" }, { KeyEvent.VK_PAGE_UP, "Page Up" },
@@ -960,15 +979,17 @@ public class SwingKeyBindingsPage implements FeaturePage {
         List<String> expected = new ArrayList<>();
         for (Object[] key : keys) {
             names.add(KeyEvent.getKeyText((Integer) key[0]));
-            expected.add((String) key[1]);
+            expected.add(Keys.text((String) key[1]));
         }
-        checks.add(InfraSupport.notOnMac(Checks.expect("KeyEvent.getKeyText (24 keys)", String.join(" · ", expected),
-                () -> String.join(" · ", names))));
-        checks.add(InfraSupport.notOnMac(Checks.expect("getModifiersExText(CTRL | SHIFT)", "Ctrl+Shift",
-                () -> InputEvent.getModifiersExText(CTRL_SHIFT))));
-        checks.add(InfraSupport.notOnMac(Checks.expect("getModifiersExText(META | ALT | ALT_GRAPH | BUTTON1)",
-                "Meta+Alt+Alt Graph+Button1", () -> InputEvent.getModifiersExText(InputEvent.META_DOWN_MASK
-                        | InputEvent.ALT_DOWN_MASK | InputEvent.ALT_GRAPH_DOWN_MASK | InputEvent.BUTTON1_DOWN_MASK))));
+        checks.add(Checks.expect("KeyEvent.getKeyText (24 keys)", String.join(" · ", expected),
+                () -> String.join(" · ", names)));
+        checks.add(Checks.expect("getModifiersExText(CTRL | SHIFT)", Keys.join("Ctrl", "Shift"),
+                () -> InputEvent.getModifiersExText(CTRL_SHIFT)));
+        // Button1 on every platform : the default of Toolkit.getProperty("AWT.button1", "Button1"), in no bundle
+        checks.add(Checks.expect("getModifiersExText(META | ALT | ALT_GRAPH | BUTTON1)",
+                Keys.join("Meta", "Alt", "Alt Graph") + "+Button1", () -> InputEvent.getModifiersExText(
+                        InputEvent.META_DOWN_MASK | InputEvent.ALT_DOWN_MASK | InputEvent.ALT_GRAPH_DOWN_MASK
+                                | InputEvent.BUTTON1_DOWN_MASK)));
         checks.add(Checks.expect("getExtendedKeyCodeForChar a, A, 1, €",
                 KeyEvent.VK_A + " " + KeyEvent.VK_A + " " + KeyEvent.VK_1 + " " + KeyEvent.VK_EURO_SIGN,
                 () -> KeyEvent.getExtendedKeyCodeForChar('a') + " " + KeyEvent.getExtendedKeyCodeForChar('A') + " "
@@ -977,7 +998,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                 () -> hex(KeyEvent.getExtendedKeyCodeForChar('é')) + " " + hex(KeyEvent.getExtendedKeyCodeForChar('ß'))
                         + " " + hex(KeyEvent.getExtendedKeyCodeForChar('ش')) + " "
                         + hex(KeyEvent.getExtendedKeyCodeForChar('ж'))));
-        checks.add(Checks.expect("KeyEvent.getKeyModifiersText(SHIFT_MASK) (old API)", "Shift",
+        checks.add(Checks.expect("KeyEvent.getKeyModifiersText(SHIFT_MASK) (old API)", Keys.text("Shift"),
                 () -> KeyEvent.getKeyModifiersText(1)));
         checks.add(Checks.expect("KeyEvent locations of a synthetic event", "LEFT 2", () -> {
             KeyEvent e = new KeyEvent(new JLabel(), KeyEvent.KEY_PRESSED, 0, InputEvent.SHIFT_DOWN_MASK,
@@ -1030,7 +1051,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                     label.setLabelFor(new JTextField());
                     label.setDisplayedMnemonic('X');
                     return label;
-                }, window, "alt X", "press"),
+                }, window, Keys.mnemonicStrokePrefix() + "X", "press"),
                 new LafBinding("JList", JList::new, focused, "DOWN", "selectNextRow"),
                 new LafBinding("JMenuBar", JMenuBar::new, window, "F10", "takeFocus"),
                 new LafBinding("JMenu", () -> new JMenu("m"), -1, null, "selectMenu"),
@@ -1062,7 +1083,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
         for (LafBinding b : bindings) {
             String expected = (b.key() == null ? "" : b.key() + " -> ") + b.action()
                     + (b.label().startsWith("JInternalFrame") ? " (no action)" : " (action present)");
-            checks.add(InfraSupport.notOnMac(Checks.expect(b.label(), expected, () -> {
+            checks.add(Checks.expect(b.label(), expected, () -> {
                 JComponent c = b.component().get();
                 String bound = b.action();
                 if (b.key() != null) {
@@ -1074,7 +1095,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
                 sizes.add(b.label() + " " + c.getActionMap().allKeys().length);
                 return (b.key() == null ? "" : b.key() + " -> ") + bound
                         + (action != null ? " (action present)" : " (no action)");
-            })));
+            }));
         }
         checks.add(Check.info("ActionMap sizes", String.join(", ", sizes)));
         return checks;
