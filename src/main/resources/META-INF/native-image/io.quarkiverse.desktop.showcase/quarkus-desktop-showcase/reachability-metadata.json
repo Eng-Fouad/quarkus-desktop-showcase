@@ -59,6 +59,7 @@
   "resources": [
     { "glob": "META-INF/services/javax.imageio.spi.ImageReaderSpi" },
     { "glob": "META-INF/services/javax.imageio.spi.ImageWriterSpi" },
+    { "glob": "META-INF/services/java.net.spi.URLStreamHandlerProvider" },
     { "bundle": "showcase.text-images.ShowcaseMetadataFormatResources" },
     { "glob": "application.properties" },
     { "glob": "application-prod.properties" },
