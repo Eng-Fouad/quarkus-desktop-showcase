@@ -222,6 +222,24 @@ menu on its first item (`awt-menus`), MIME types are native clipboard formats (`
 (`print-dialogs`), `PSPrinterJob` printing to a stream service itself (`print-java2d`), the file view icons of the look
 and feel as system icons (`swing-choosers`).
 
+## Continuous integration
+
+`.github/workflows/cycle.yml` runs the cycles of the Linux image on GitHub Actions against a quarkus-desktop commit (it
+is installed in the Maven repository of the container first): the default and awt-only variants with the tracing agent,
+and both with `--exact`, on `ubuntu-24.04-arm` (other runners through the `runners` input, e.g.
+`["ubuntu-24.04-arm", "ubuntu-24.04"]`). Each cycle runs with `--require-focus`. `Cycle.java` exits 1 when a run fails,
+when `--exact` finds accesses missing from the metadata, or when the runs do not match: the job fails, the summary of
+the run shows the verdict, what differs and the MetadataDiff headings, the same details are annotations of the job, and
+the logs, reports and metadata are artifacts (with the images of both runs when the job failed).
+
+- `.github/workflows/showcase.yml` (this repository): on every push and pull request, every night (the builder image
+  and quarkus-desktop change without the showcase), and manually (`workflow_dispatch`: another quarkus-desktop commit,
+  other runners, and two experiments that never fail the run: a Windows cycle on `windows-2025`, whose screen is small
+  and whose Direct3D is off, and two JVM runs on `macos-15`, macOS native executables needing the Quarkus pull request
+  56979).
+- `.github/workflows/showcase.yml` of quarkus-desktop calls the same workflow on every push to its main branch, on its
+  pull requests labelled `showcase`, and manually.
+
 ## Writing a page
 
 A page is a CDI bean implementing `io.quarkiverse.desktop.showcase.core.FeaturePage`:
