@@ -314,6 +314,11 @@ public class DragAndDropPage implements FeaturePage {
                 if (log.started) {
                     // cancelled : nothing is dropped
                     robot.nativeKeys(true);
+                    if (Platforms.isMac()) {
+                        // a plain Escape : the copy key (Option) released first, Option+Escape is a shortcut of macOS
+                        // (Speak selection, Accessibility > Spoken Content) ; Windows and Linux cancel with Ctrl held
+                        robot.keyRelease(Keys.copyDragKey());
+                    }
                     robot.key(KeyEvent.VK_ESCAPE);
                     robot.nativeKeys(false);
                 }
