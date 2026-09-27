@@ -426,9 +426,11 @@ public class AccessibilityPage implements FeaturePage {
             }
             return c.getAccessibleChildrenCount() + ", " + String.join("|", names);
         }));
-        // addAccessibleSelection calls List.select, which calls the peer. macOS : LWListPeer.select calls
-        // JList.setSelectedIndex, which replaces the selection (setSelectionInterval) even in multiple mode : 1 is no
-        // longer selected (Windows, Linux : the native list adds the index to the selection)
+        // addAccessibleSelection calls List.select, which calls the peer. Windows (native list) and Linux
+        // (XListPeer.selectItem) add the index in multiple mode, as List.select does without a peer and as the
+        // addAccessibleSelection contract says. macOS : LWListPeer.select calls JList.setSelectedIndex, which replaces
+        // the selection (setSelectionInterval) even in multiple mode : 1 is no longer selected. A defect of the macOS
+        // JDK peer : a JDK fix would make this check fail (then [0, 1] on every OS)
         String selectionAfter = Platforms.isMac() ? "[0]" : "[0, 1]";
         checks.add(Checks.expect("list : addAccessibleSelection(0), removeAccessibleSelection(3)", selectionAfter, () -> {
             AccessibleSelection selection = g.list().getAccessibleContext().getAccessibleSelection();

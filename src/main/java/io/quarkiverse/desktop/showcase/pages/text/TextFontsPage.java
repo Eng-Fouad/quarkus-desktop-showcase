@@ -721,8 +721,11 @@ public class TextFontsPage implements FeaturePage {
 
     private static String expectedKind(String label) {
         // Roboto's gasp table asks for no smoothing at 15 px. macOS : text is never rendered without anti-aliasing,
-        // SunGraphics2D.checkFontInfo and FontStrikeDesc.getAAHintIntVal turn TEXT_ANTIALIAS_OFF, DEFAULT and GASP into
-        // TEXT_ANTIALIAS_ON when FontUtilities.isMacOSX14 (macOS 10.14 and later), for every font (Roboto : FreeType)
+        // for every font (Roboto : FreeType), when FontUtilities.isMacOSX14 (macOS 10.14 and later). The strike :
+        // SunGraphics2D.checkFontInfo resolves DEFAULT (no ANTIALIAS_ON hint) and GASP (Roboto at 15 px) to OFF, then
+        // turns OFF into ON (FontStrikeDesc.getAAHintIntVal does the same for a FontRenderContext). The pipe : the
+        // SurfaceData static initializer sets solidTextRenderer = aaTextRenderer, the pipe that getTextPipe returns for
+        // OFF and DEFAULT (without it, the gray strike would still be drawn by the black and white pipe)
         if (label.equals("TEXT_ANTIALIAS_OFF") || label.equals("TEXT_ANTIALIAS_DEFAULT")
                 || label.equals("TEXT_ANTIALIAS_GASP")) {
             return Platforms.isMac() ? "gray" : "bw";
