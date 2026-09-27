@@ -24,6 +24,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -62,6 +63,7 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -184,8 +186,18 @@ public class MenusPopupsPage implements FeaturePage {
                 s.menuTable, s.popupTable);
     }
 
+    /**
+     * The menu shortcut modifier of the platform as a key stroke word ({@code AWTKeyStroke.toString}, the names of
+     * the checks) : {@code ctrl}, or {@code meta} (Command) on macOS.
+     */
+    private static String shortcut() {
+        return Keys.menuShortcutName().toLowerCase(Locale.ROOT);
+    }
+
     private static JMenuBar menuBar(State s) {
-        int ctrl = InputEvent.CTRL_DOWN_MASK;
+        // the accelerators use the menu shortcut key of the platform : Ctrl, Command on macOS
+        // (Toolkit.getMenuShortcutKeyMaskEx : CTRL_DOWN_MASK, LWCToolkit overrides it with META_DOWN_MASK)
+        int ctrl = Keys.menuShortcutMaskEx();
         JMenuBar bar = new JMenuBar();
 
         s.file = menu("File", KeyEvent.VK_F, s);
@@ -322,7 +334,7 @@ public class MenusPopupsPage implements FeaturePage {
             }
         };
         action.putValue(Action.MNEMONIC_KEY, mnemonic);
-        action.putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(key, InputEvent.CTRL_DOWN_MASK));
+        action.putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(key, Keys.menuShortcutMaskEx()));
         action.putValue(Action.SHORT_DESCRIPTION, name + " the selection");
         return action;
     }
@@ -533,8 +545,9 @@ public class MenusPopupsPage implements FeaturePage {
         checks.add(Checks.info("menu bar: Help menu bounds", () -> SwingKit.rect(s.help.getBounds())));
         checks.add(Checks.expect("File: item count, menu components", "10 10",
                 () -> s.file.getItemCount() + " " + s.file.getMenuComponentCount()));
-        checks.add(Checks.expect("File: accelerators", "ctrl pressed N, ctrl pressed O, ctrl pressed S, "
-                + "shift ctrl pressed S, ctrl pressed P, ctrl pressed W", () -> {
+        String m = shortcut();
+        checks.add(Checks.expect("File: accelerators", m + " pressed N, " + m + " pressed O, " + m + " pressed S, "
+                + "shift " + m + " pressed S, " + m + " pressed P, " + m + " pressed W", () -> {
                     List<String> strokes = new ArrayList<>();
                     for (int i = 0; i < s.file.getItemCount(); i++) {
                         JMenuItem item = s.file.getItem(i);
@@ -545,19 +558,23 @@ public class MenusPopupsPage implements FeaturePage {
                     return String.join(", ", strokes);
                 }));
         checks.add(Checks.expect("Edit: action based items (text, mnemonic, accelerator, tool tip)",
-                "Copy 67 ctrl pressed C Copy the selection", () -> {
+                "Copy 67 " + m + " pressed C Copy the selection", () -> {
                     JMenuItem item = s.edit.getItem(4);
                     return item.getText() + " " + item.getMnemonic() + " " + item.getAccelerator() + " "
                             + item.getToolTipText();
                 }));
         checks.add(Checks.expect("Save As: mnemonic, displayed mnemonic index", "65 5",
                 () -> s.saveAs.getMnemonic() + " " + s.saveAs.getDisplayedMnemonicIndex()));
-        checks.add(Checks.expect("accelerator texts (modifiers, keys)", "Ctrl+Shift F3 N -", () -> InputEvent
-                .getModifiersExText(InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK) + " "
+        // the modifiers of the Save As accelerator ; on macOS, KeyEvent.getModifiersExText and getKeyText read the
+        // sun.awt.resources.awtosx bundle that LWCToolkit sets as the platform resources of Toolkit.getProperty :
+        // AWT.meta is ⌘ and AWT.shift ⇧ there
+        checks.add(Checks.expect("accelerator texts (modifiers, keys)",
+                Keys.join(Keys.menuShortcutName(), "Shift") + " F3 N -", () -> InputEvent
+                .getModifiersExText(Keys.menuShortcutMaskEx() | InputEvent.SHIFT_DOWN_MASK) + " "
                 + KeyEvent.getKeyText(KeyEvent.VK_F3) + " " + KeyEvent.getKeyText(KeyEvent.VK_N) + " "
                 + UIManager.getString("MenuItem.acceleratorDelimiter")));
-        checks.add(Checks.expect("KeyStroke.getKeyStroke(\"shift ctrl S\") equals the Save As accelerator", true,
-                () -> KeyStroke.getKeyStroke("shift ctrl S").equals(s.saveAs.getAccelerator())));
+        checks.add(Checks.expect("KeyStroke.getKeyStroke(\"shift " + m + " S\") equals the Save As accelerator", true,
+                () -> KeyStroke.getKeyStroke("shift " + m + " S").equals(s.saveAs.getAccelerator())));
         checks.add(Checks.expect("UI delegates (bar, menu, item, check, radio, popup)",
                 "MetalMenuBarUI BasicMenuUI BasicMenuItemUI BasicCheckBoxMenuItemUI BasicRadioButtonMenuItemUI "
                         + "BasicPopupMenuUI",
@@ -569,9 +586,14 @@ public class MenusPopupsPage implements FeaturePage {
                 "true true true", () -> (s.newItem.getActionMap().get("doClick") != null) + " "
                         + (s.file.getActionMap().get("selectMenu") != null) + " "
                         + (bar.getActionMap().get("takeFocus") != null)));
-        checks.add(Checks.expect("bindings : bar F10, menu alt F (in focused window)", "takeFocus selectMenu",
+        // BasicMenuUI.updateMnemonicBinding binds the mnemonic with the Menu.shortcutKeys of BasicLookAndFeel :
+        // SwingUtilities2.getSystemMnemonicKeyMask(), i.e. SunToolkit.getFocusAcceleratorKeyMask() : ALT_MASK,
+        // CTRL_MASK | ALT_MASK on macOS (LWCToolkit) ; F10 is the MenuBar.windowBindings of Basic on every platform
+        String mnemonicF = Keys.mnemonicStrokePrefix() + "F";
+        checks.add(Checks.expect("bindings : bar F10, menu " + mnemonicF + " (in focused window)",
+                "takeFocus selectMenu",
                 () -> bar.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(KeyStroke.getKeyStroke("F10")) + " "
-                        + s.file.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(KeyStroke.getKeyStroke("alt F"))));
+                        + s.file.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(KeyStroke.getKeyStroke(mnemonicF))));
         checks.add(Checks.expect("HTML item: html property set", true,
                 () -> s.html.getClientProperty("html") != null));
 
@@ -594,13 +616,14 @@ public class MenusPopupsPage implements FeaturePage {
             return String.join(", ", s.actions) + ", selected: " + s.small.isSelected() + " " + s.large.isSelected();
         }));
         s.actions.clear();
-        checks.add(Checks.expect("synthetic ctrl+N, ctrl+shift+S, F3 and ctrl+C key presses", "New, Save As..., "
-                + "Find Next, action Copy", () -> {
-                    SwingKit.key(s.barHolder, InputEvent.CTRL_DOWN_MASK, KeyEvent.VK_N, KeyEvent.CHAR_UNDEFINED);
-                    SwingKit.key(s.barHolder, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK, KeyEvent.VK_S,
+        checks.add(Checks.expect("synthetic " + m + "+N, " + m + "+shift+S, F3 and " + m + "+C key presses",
+                "New, Save As..., Find Next, action Copy", () -> {
+                    int shortcut = Keys.menuShortcutMaskEx();
+                    SwingKit.key(s.barHolder, shortcut, KeyEvent.VK_N, KeyEvent.CHAR_UNDEFINED);
+                    SwingKit.key(s.barHolder, shortcut | InputEvent.SHIFT_DOWN_MASK, KeyEvent.VK_S,
                             KeyEvent.CHAR_UNDEFINED);
                     SwingKit.key(s.barHolder, 0, KeyEvent.VK_F3, KeyEvent.CHAR_UNDEFINED);
-                    SwingKit.key(s.barHolder, InputEvent.CTRL_DOWN_MASK, KeyEvent.VK_C, KeyEvent.CHAR_UNDEFINED);
+                    SwingKit.key(s.barHolder, shortcut, KeyEvent.VK_C, KeyEvent.CHAR_UNDEFINED);
                     return String.join(", ", s.actions);
                 }));
         s.actions.clear();

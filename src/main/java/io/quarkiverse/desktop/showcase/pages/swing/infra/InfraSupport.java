@@ -21,9 +21,7 @@ import javax.swing.JTextArea;
 import javax.swing.border.Border;
 import javax.swing.text.DefaultCaret;
 
-import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
-import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -136,14 +134,6 @@ final class InfraSupport {
      */
     static String digitsNormalized(String s) {
         return s.replaceAll("-[0-9]+", "-#");
-    }
-
-    /**
-     * {@code check} as is, except on macOS where a failure becomes informational (the key bindings, key names and some
-     * look and feel defaults of macOS differ from those of Windows and Linux).
-     */
-    static Check notOnMac(Check check) {
-        return Platforms.isMac() && Boolean.FALSE.equals(check.ok()) ? Check.info(check.name(), check.value()) : check;
     }
 
     // ------------------------------------------------------------------------------------------------ blocks

@@ -61,6 +61,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.swing.controls.ControlsSupport.Readiness;
 import io.quarkiverse.desktop.showcase.pages.swing.controls.ControlsSupport.EventLog;
@@ -526,8 +527,11 @@ public class ButtonsPage implements FeaturePage {
         checks.add(Checks.expect("KeyStroke.getKeyStroke : typed a, released ENTER, alt F4", "typed a | released ENTER | alt pressed F4",
                 () -> KeyStroke.getKeyStroke("typed a") + " | " + KeyStroke.getKeyStroke("released ENTER") + " | "
                         + KeyStroke.getKeyStroke("alt F4")));
+        // on macOS, LWCToolkit sets sun.awt.resources.awtosx as the platform resources that Toolkit.getProperty reads
+        // before the awt bundle : AWT.enter is ⏎ there (A and F4 have the same name everywhere)
         checks.add(Checks.expect("KeyEvent.getKeyText(VK_A / VK_F4 / VK_ENTER) (bundle sun.awt.resources.awt)",
-                "A / F4 / Enter", () -> KeyEvent.getKeyText(KeyEvent.VK_A) + " / " + KeyEvent.getKeyText(KeyEvent.VK_F4)
+                "A / F4 / " + Keys.text("Enter"),
+                () -> KeyEvent.getKeyText(KeyEvent.VK_A) + " / " + KeyEvent.getKeyText(KeyEvent.VK_F4)
                         + " / " + KeyEvent.getKeyText(KeyEvent.VK_ENTER)));
         checks.add(Checks.expect("Action -> JButton properties",
                 "text=Save As, mnemonic=65, displayedMnemonicIndex=5, tooltip=Save under another name, command=save-as",
