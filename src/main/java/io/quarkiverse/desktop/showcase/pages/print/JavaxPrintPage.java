@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionStage;
 
 import javax.imageio.ImageIO;
@@ -86,6 +87,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -427,9 +429,7 @@ public class JavaxPrintPage implements FeaturePage {
                     }
                     return ranges + ", " + String.join(" ", members) + ", " + ranges.contains(8) + ", " + ranges.next(3);
                 }));
-        checks.add(Checks.expect("MediaSize.findMedia(8.5, 11, INCH), (210, 297, MM)", "na-letter, iso-a4",
-                () -> MediaSize.findMedia(8.5f, 11f, Size2DSyntax.INCH) + ", "
-                        + MediaSize.findMedia(210, 297, Size2DSyntax.MM)));
+        checks.add(findMedia());
         checks.add(Checks.expect("MediaSize of ISO_A4 / NA_LETTER / ISO_A6", "210.0x297.0 mm / 8.5x11.0 in / 105.0x148.0 mm",
                 () -> MediaSize.getMediaSizeForName(MediaSizeName.ISO_A4).toString(Size2DSyntax.MM, "mm") + " / "
                         + MediaSize.getMediaSizeForName(MediaSizeName.NA_LETTER).toString(Size2DSyntax.INCH, "in") + " / "
@@ -496,6 +496,41 @@ public class JavaxPrintPage implements FeaturePage {
                     return (destination instanceof PrintRequestAttribute) + " " + doc;
                 }));
         return checks;
+    }
+
+    /**
+     * {@code MediaSize.findMedia} returns the first registered {@code MediaSize} of exactly that size : 8.5 x 11 in is
+     * {@code NA.LETTER} (na-letter) and {@code Engineering.A} (a), registered in the order their classes initialize.
+     * The static initializer of {@code MediaSize} initializes {@code ISO, JIS, NA, Engineering, Other} : NA.LETTER comes
+     * first. But when {@code MediaSize.NA} is the first class touched, {@code NA.<clinit>} triggers
+     * {@code MediaSize.<clinit>}, which skips NA (being initialized) and registers Engineering.A before NA.LETTER.
+     * <p>
+     * On macOS (no printer : no print service touches MediaSize) the first access depends on the pages shown before
+     * in the process. After swing-printing (default variant) : {@code CPrinterJob.print} sent its jobs for a
+     * StreamPrintService straight to {@code spoolToService} (no {@code setAttributes}), and {@code PSStreamPrintJob}
+     * starts with {@code mediaSize = MediaSize.NA.LETTER} : "a". After print-java2d alone ({@code PrinterJob
+     * .getPageFormat} calls {@code MediaSize.getMediaSizeForName}), or when this call is the first : na-letter. Both are
+     * the JDK's answer for this process ; anything else fails. The value is fixed for a given variant and page set (the
+     * same in the JVM and in the native executable, run after run), and tools/Compare.java reports it when it changes
+     * between two runs of the same pages. It is not pinned to one value : that would tie this check to the pages shown
+     * before it, or need a macOS-only MediaSize access at startup, which would hide the class initialization order (a
+     * MediaSize initialized at build time in the native executable shows here as a JVM / native difference).
+     */
+    private static Check findMedia() {
+        String name = "MediaSize.findMedia(8.5, 11, INCH), (210, 297, MM)";
+        Callable<String> action = () -> MediaSize.findMedia(8.5f, 11f, Size2DSyntax.INCH) + ", "
+                + MediaSize.findMedia(210, 297, Size2DSyntax.MM);
+        if (!Platforms.isMac()) {
+            return Checks.expect(name, "na-letter, iso-a4", action);
+        }
+        String value;
+        try {
+            value = action.call();
+        } catch (Throwable t) {
+            return Check.fail(name, Checks.describe(t));
+        }
+        boolean ok = value.equals("na-letter, iso-a4") || value.equals("a, iso-a4");
+        return Check.of(name, ok, ok ? value : "expected na-letter, iso-a4 or a, iso-a4 but got " + value);
     }
 
     // ------------------------------------------------------------------------------------------------ print jobs
