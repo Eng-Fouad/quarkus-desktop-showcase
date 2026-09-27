@@ -41,6 +41,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Grid;
 import io.quarkiverse.desktop.showcase.core.Grid.Tile;
+import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
 /**
@@ -860,7 +861,11 @@ public class TransformsClipPage implements FeaturePage {
             Image b = mri.getResolutionVariant(60, 60);
             return a.getWidth(null) + "x" + a.getHeight(null) + " / " + b.getWidth(null) + "x" + b.getHeight(null);
         }));
-        checks.add(Checks.expect("LCD_HRGB text has color fringes / GASP none", "true / false", () -> {
+        // macOS : Dialog is a CFont, rasterized by CoreGraphics (CStrike, native CGGlyphImages), which has no subpixel
+        // anti-aliasing since macOS 10.14 : its LCD glyph images are gray (R = G = B, see the Dialog rows of text-fonts ;
+        // a font rasterized by the FreeType scaler of the JDK, such as a created font, does have fringes)
+        checks.add(Checks.expect("LCD_HRGB text has color fringes / GASP none",
+                Platforms.isMac() ? "false / false" : "true / false", () -> {
             BufferedImage lcd = textImage(80, 20, g -> {
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB);
                 g.drawString("Quartz jog", 2, 14);

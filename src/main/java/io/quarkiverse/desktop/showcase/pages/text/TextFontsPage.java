@@ -311,7 +311,11 @@ public class TextFontsPage implements FeaturePage {
         checks.add(Checks.expect("logical families : getFamily()", "Dialog DialogInput Serif SansSerif Monospaced",
                 () -> Platforms.LOGICAL_FAMILIES.stream().map(f -> new Font(f, Font.PLAIN, 12).getFamily(Locale.ROOT))
                         .collect(Collectors.joining(" "))));
-        checks.add(Checks.expect("logical font names (Serif, 4 styles)", "Serif.plain Serif.bold Serif.italic Serif.bolditalic",
+        // Windows, Linux : a logical font is a CompositeFont named <family>.<style>. macOS : CFontManager.setupLogicalFonts
+        // clones the 4 styles of the real family (Serif : Times) with new CFont(realFont, "Serif"), whose full name is
+        // the logical family name for every style
+        checks.add(Checks.expect("logical font names (Serif, 4 styles)",
+                Platforms.isMac() ? "Serif Serif Serif Serif" : "Serif.plain Serif.bold Serif.italic Serif.bolditalic",
                 () -> Arrays.stream(new int[] { Font.PLAIN, Font.BOLD, Font.ITALIC, Font.BOLD | Font.ITALIC })
                         .mapToObj(s -> new Font(Font.SERIF, s, 12).getFontName(Locale.ROOT))
                         .collect(Collectors.joining(" "))));
@@ -716,10 +720,12 @@ public class TextFontsPage implements FeaturePage {
     }
 
     private static String expectedKind(String label) {
-        // Roboto's gasp table asks for no smoothing at 15 px
+        // Roboto's gasp table asks for no smoothing at 15 px. macOS : text is never rendered without anti-aliasing,
+        // SunGraphics2D.checkFontInfo and FontStrikeDesc.getAAHintIntVal turn TEXT_ANTIALIAS_OFF, DEFAULT and GASP into
+        // TEXT_ANTIALIAS_ON when FontUtilities.isMacOSX14 (macOS 10.14 and later), for every font (Roboto : FreeType)
         if (label.equals("TEXT_ANTIALIAS_OFF") || label.equals("TEXT_ANTIALIAS_DEFAULT")
                 || label.equals("TEXT_ANTIALIAS_GASP")) {
-            return "bw";
+            return Platforms.isMac() ? "gray" : "bw";
         }
         if (label.startsWith("LCD_") && !label.contains("ARGB")) {
             return "color";
