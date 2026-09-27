@@ -836,7 +836,13 @@ public class SwingContainersPage implements FeaturePage {
         Window window = SwingUtilities.getWindowAncestor(bar);
         s.floatingWindow = window;
         if (window instanceof RootPaneContainer container) {
-            s.floatingImage = Snapshots.render(container.getRootPane());
+            // at its preferred size : X11 packs the floating window with the frame insets that it knows then (the
+            // guess of the toolkit, or the frame extents of the window manager once it answered : openbox, 25,5,5,5
+            // or 18,1,1,1) and the root pane takes what is left (110x43 or 102x32 on Linux, from one run to the next)
+            JRootPane root = container.getRootPane();
+            root.setSize(root.getPreferredSize());
+            root.validate();
+            s.floatingImage = Snapshots.render(root);
         }
     }
 
