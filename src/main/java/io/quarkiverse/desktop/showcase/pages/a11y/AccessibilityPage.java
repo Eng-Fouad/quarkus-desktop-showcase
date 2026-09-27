@@ -426,13 +426,19 @@ public class AccessibilityPage implements FeaturePage {
             }
             return c.getAccessibleChildrenCount() + ", " + String.join("|", names);
         }));
-        checks.add(Checks.expect("list : addAccessibleSelection(0), removeAccessibleSelection(3)", "[0, 1]", () -> {
+        // addAccessibleSelection calls List.select, which calls the peer. macOS : LWListPeer.select calls
+        // JList.setSelectedIndex, which replaces the selection (setSelectionInterval) even in multiple mode : 1 is no
+        // longer selected (Windows, Linux : the native list adds the index to the selection)
+        String selectionAfter = Platforms.isMac() ? "[0]" : "[0, 1]";
+        checks.add(Checks.expect("list : addAccessibleSelection(0), removeAccessibleSelection(3)", selectionAfter, () -> {
             AccessibleSelection selection = g.list().getAccessibleContext().getAccessibleSelection();
             selection.addAccessibleSelection(0);
             selection.removeAccessibleSelection(3);
             return Arrays.toString(g.list().getSelectedIndexes());
         }));
-        checks.add(Checks.expect("list item : role, states", "list item, enabled,focusable,selected,showing,visible",
+        // item 1 : selected, except on macOS (deselected by addAccessibleSelection(0) above)
+        checks.add(Checks.expect("list item : role, states", "list item, enabled,focusable,"
+                + (Platforms.isMac() ? "" : "selected,") + "showing,visible",
                 () -> {
                     AccessibleContext item = g.list().getAccessibleContext().getAccessibleChild(1).getAccessibleContext();
                     return AccessibleDump.role(item) + ", " + AccessibleDump.states(item);
