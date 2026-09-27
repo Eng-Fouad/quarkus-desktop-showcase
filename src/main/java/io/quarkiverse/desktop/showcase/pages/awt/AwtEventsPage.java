@@ -164,11 +164,15 @@ public class AwtEventsPage implements FeaturePage {
 
         private void record(AWTEvent e) {
             if (recording) {
-                String entry = AwtSupport.describe(e);
-                synchronized (log) {
-                    if (!repeatedMove(e, entry, log.isEmpty() ? null : log.get(log.size() - 1))) {
-                        log.add(entry);
+                if (Platforms.isMac()) {
+                    String entry = AwtSupport.describe(e);
+                    synchronized (log) {
+                        if (!repeatedMove(e, entry, log.isEmpty() ? null : log.get(log.size() - 1))) {
+                            log.add(entry);
+                        }
                     }
+                } else {
+                    log.add(AwtSupport.describe(e));
                 }
             }
         }
@@ -403,15 +407,19 @@ public class AwtEventsPage implements FeaturePage {
         target.setName("targetCanvas");
         target.setPreferredSize(new Dimension(CANVAS_WIDTH, CANVAS_HEIGHT));
         List<String> global = Collections.synchronizedList(new ArrayList<>());
-        // the description of the last event of the target seen by the listener (on the EDT only)
+        // macOS : the description of the last event of the target seen by the listener (on the EDT only)
         String[] lastGlobal = new String[1];
         globalListener = e -> {
             if (e.getSource() == target && target.recording) {
-                String entry = AwtSupport.describe(e);
-                if (!repeatedMove(e, entry, lastGlobal[0])) {
+                if (Platforms.isMac()) {
+                    String entry = AwtSupport.describe(e);
+                    if (!repeatedMove(e, entry, lastGlobal[0])) {
+                        global.add(AwtSupport.idName(e));
+                    }
+                    lastGlobal[0] = entry;
+                } else {
                     global.add(AwtSupport.idName(e));
                 }
-                lastGlobal[0] = entry;
             }
         };
         Toolkit.getDefaultToolkit().addAWTEventListener(globalListener, AWTEvent.MOUSE_EVENT_MASK
@@ -784,7 +792,7 @@ public class AwtEventsPage implements FeaturePage {
         targetFrame.setAlwaysOnTop(true);
         targetFrame.add(target, BorderLayout.CENTER);
         if (Platforms.isMac()) {
-            targetFrame.add(enterStrip(), BorderLayout.NORTH);
+            targetFrame.add(restStrip(), BorderLayout.EAST);
         }
         targetFrame.pack();
         java.awt.Rectangle area = AwtSupport.secondaryArea(targetFrame.getWidth(), targetFrame.getHeight());
@@ -915,17 +923,17 @@ public class AwtEventsPage implements FeaturePage {
                 .map(Keys::text).toList());
     }
 
-    /** Height of the strip above the canvas in the target frame (macOS, see {@link #rest}). */
-    private static final int STRIP_HEIGHT = 24;
+    /** Width of the strip right of the canvas in the target frame (macOS, see {@link #rest}). */
+    private static final int STRIP_WIDTH = 24;
 
     /**
-     * The strip of the target frame above the canvas, on macOS (see {@link #rest}) : a part of the content view of the
-     * window that is not the canvas.
+     * The strip of the target frame right of the canvas, on macOS (see {@link #rest}) : a part of the content view of
+     * the window that is not the canvas.
      */
-    private static Component enterStrip() {
+    private static Component restStrip() {
         java.awt.Panel strip = new java.awt.Panel();
-        strip.setName("enterStrip");
-        strip.setPreferredSize(new Dimension(CANVAS_WIDTH, STRIP_HEIGHT));
+        strip.setName("restStrip");
+        strip.setPreferredSize(new Dimension(STRIP_WIDTH, CANVAS_HEIGHT));
         return strip;
     }
 
@@ -935,13 +943,17 @@ public class AwtEventsPage implements FeaturePage {
      * mouse event while the pointer is over the title bar, not even the exit (seen on macOS 27 : no MOUSE_EXITED, no
      * MOUSE_MOVED) : {@code LWWindowPeer}, which makes the MOUSE_ENTERED and MOUSE_EXITED of the components from the
      * mouse events of the window ({@code generateMouseEnterExitEventsForComponents}), would still have the canvas
-     * under the pointer, and post no MOUSE_ENTERED when the pointer comes back. There the pointer rests in the strip
-     * above the canvas ({@link #enterStrip()}, part of the content view) : the move from the strip into the canvas
-     * posts the MOUSE_EXITED of the strip and the MOUSE_ENTERED of the canvas. 20 px above the canvas : the arrow of
-     * the pointer, drawn down from its tip, stays out of the canvas and of its capture.
+     * under the pointer, and post no MOUSE_ENTERED when the pointer comes back. There the pointer rests in the middle
+     * of the strip right of the canvas ({@link #restStrip()}, part of the content view) : the move from the strip into
+     * the canvas posts the MOUSE_EXITED of the strip and the MOUSE_ENTERED of the canvas. The screen pixels that Robot
+     * reads there include the pointer (see {@link #probe}) : its arrow ({@code NSCursor.arrow} of macOS 27, a 28 x 40
+     * image with its hot spot at 5,5, opaque from 3 px left of and above the tip to 11 px right of and 18 px below it)
+     * is scaled by the pointer size of the Accessibility settings (at most 4 : 12 px left of the tip), and stays right
+     * of the canvas, out of the pixels probed and captured, whatever that size.
      */
     private static Point rest(Point origin) {
-        return new Point(origin.x + CANVAS_WIDTH / 2, origin.y - (Platforms.isMac() ? STRIP_HEIGHT - 4 : 4));
+        return Platforms.isMac() ? new Point(origin.x + CANVAS_WIDTH + STRIP_WIDTH / 2, origin.y + CANVAS_HEIGHT / 2)
+                : new Point(origin.x + CANVAS_WIDTH / 2, origin.y - 4);
     }
 
     /**
@@ -957,17 +969,17 @@ public class AwtEventsPage implements FeaturePage {
     }
 
     /**
-     * {@code true} on macOS for a MOUSE_MOVED whose description {@code entry} is the one of the event recorded just
+     * macOS only : {@code true} for a MOUSE_MOVED whose description {@code entry} is the one of the event recorded just
      * before ({@code previous}) : there each pointer move of Robot comes twice to the window (seen on macOS 27 : two
      * MOUSE_MOVED at the same point for each {@code Robot.mouseMove} ; AppKit calls {@code mouseMoved:} of the content
      * view {@code AWTView} both as the first responder of a window that accepts mouse moved events and as the owner of
      * a tracking area with {@code NSTrackingMouseMoved}), and the event queue merges the second into the first only
      * while the first is still queued ({@code EventQueue.coalesceMouseEvent}) : one or two events depending on the
-     * timing (they differed between a JVM and a native run). The log and the counts keep one. Windows and Linux :
-     * never.
+     * timing (they differed between a JVM and a native run). The log and the counts keep one. Not called on Windows
+     * and Linux (every event recorded).
      */
     private static boolean repeatedMove(AWTEvent e, String entry, String previous) {
-        return Platforms.isMac() && e.getID() == MouseEvent.MOUSE_MOVED && entry.equals(previous);
+        return e.getID() == MouseEvent.MOUSE_MOVED && entry.equals(previous);
     }
 
     /**
@@ -988,11 +1000,15 @@ public class AwtEventsPage implements FeaturePage {
      */
     private List<Check> drive(RecordingCanvas target, List<String> global, Point origin, boolean keys) throws Exception {
         List<Check> checks = new ArrayList<>();
+        BufferedImage painted = null;
         if (Platforms.isMac()) {
             // the direction of the Robot wheel events there (see expectedMouse) : read here, off the EDT
             Boolean natural = MacPreferences.naturalScrolling();
             checks.add(Check.info("scroll direction (macOS preference com.apple.swipescrolldirection)",
                     natural == null ? "unknown" : natural ? "natural" : "not natural"));
+            // what the canvas paints, for its capture (see snapToPainted)
+            painted = Edt.supply(() -> paintedCanvas(target)).toCompletableFuture().get(10,
+                    java.util.concurrent.TimeUnit.SECONDS);
         }
         try (RobotSession robot = RobotSession.open()) {
             if (Platforms.isMac()) {
@@ -1016,7 +1032,7 @@ public class AwtEventsPage implements FeaturePage {
                 }
                 robot.skipped().clear();
                 global.clear();
-                sequence(robot, target, origin, keys);
+                sequence(robot, target, origin, keys, painted);
                 log = new ArrayList<>(target.log);
                 if (!complete(log, keys) && attempt < ATTEMPTS) {
                     RobotSession.logRetry("awt-events Robot sequence", attempt, results(log, keys) + " skipped "
@@ -1093,9 +1109,10 @@ public class AwtEventsPage implements FeaturePage {
     /**
      * One run of the Robot sequence : mouse moves, clicks, a drag, the right button, the wheel and keys.
      */
-    private void sequence(RobotSession robot, RecordingCanvas target, Point origin, boolean keys) {
-        // start outside the canvas (in the frame insets, still our window ; in a strip of the frame on macOS), then
-        // record
+    private void sequence(RobotSession robot, RecordingCanvas target, Point origin, boolean keys,
+            BufferedImage painted) {
+        // start outside the canvas (in the frame insets, still our window ; in a strip of the frame on macOS, see rest),
+        // then record
         robot.move(rest(origin));
         robot.delay(100);
         target.log.clear();
@@ -1142,24 +1159,43 @@ public class AwtEventsPage implements FeaturePage {
         // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
         BufferedImage screen = robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
                 CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16));
-        if (Platforms.isMac()) {
-            snapBackground(screen);
+        if (painted != null) {
+            snapToPainted(screen, painted, 8, 8);
         }
         captures.put("canvas-screen", screen);
         target.recording = false;
     }
 
     /**
-     * macOS : Robot reads the screen through the color profile of the display, and the colors it reads vary by a level
-     * or two from run to run (the canvas painted #37474F was read #36474F in most runs, #38474F in others, before and
-     * after the changes of the page) : the pixels of the capture within {@link RobotSession#COLOR_TOLERANCE} of the
-     * canvas color get the painted color ({@link RobotSession#snap}), the others (the text) stay as read.
+     * What {@code canvas} paints (on the EDT), for {@link #snapToPainted}.
      */
-    private static void snapBackground(BufferedImage screen) {
-        for (int y = 0; y < screen.getHeight(); y++) {
-            for (int x = 0; x < screen.getWidth(); x++) {
+    private static BufferedImage paintedCanvas(RecordingCanvas canvas) {
+        BufferedImage image = new BufferedImage(Math.max(1, canvas.getWidth()), Math.max(1, canvas.getHeight()),
+                BufferedImage.TYPE_INT_RGB);
+        Graphics g = image.createGraphics();
+        try {
+            canvas.paint(g);
+        } finally {
+            g.dispose();
+        }
+        return image;
+    }
+
+    /**
+     * macOS : Robot reads the screen through the color profile of the display, and the colors it reads vary by a level
+     * or two from run to run (the canvas painted #37474F was read #36474F in most runs, #38474F in others ; the
+     * antialiased text by 1 or 2 levels too) : each pixel of the capture {@code screen} within
+     * {@link RobotSession#COLOR_TOLERANCE} of the pixel the canvas painted there ({@code painted}, at
+     * {@code dx, dy} from the capture) gets the painted color ({@link RobotSession#snap}, the per pixel form of
+     * {@link RobotSession#sameImage}), the others (a real difference : a window covering the canvas, the pointer) stay
+     * as read. The canvas painted into an image renders its text like the screen (macOS 27, the same glyphs of the
+     * native font scaler : at most 3 levels apart as read).
+     */
+    private static void snapToPainted(BufferedImage screen, BufferedImage painted, int dx, int dy) {
+        for (int y = 0; y < screen.getHeight() && y + dy < painted.getHeight(); y++) {
+            for (int x = 0; x < screen.getWidth() && x + dx < painted.getWidth(); x++) {
                 int argb = screen.getRGB(x, y);
-                screen.setRGB(x, y, (argb & 0xFF000000) | RobotSession.snap(argb, CANVAS_COLOR));
+                screen.setRGB(x, y, (argb & 0xFF000000) | RobotSession.snap(argb, painted.getRGB(x + dx, y + dy)));
             }
         }
     }
