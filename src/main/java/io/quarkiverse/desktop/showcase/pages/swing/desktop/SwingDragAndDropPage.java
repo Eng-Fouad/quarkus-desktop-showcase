@@ -434,6 +434,7 @@ public class SwingDragAndDropPage implements FeaturePage {
             }
             if (!robot.awaitVisible(plan.component(), probes)) {
                 outcome = "skipped: the page is not visible on screen";
+                RobotSession.logRetry("dt-dnd-swing " + name, attempt, "covered : " + robot.lastMismatch());
                 continue;
             }
             if (!robot.press(InputEvent.BUTTON1_DOWN_MASK)) {
@@ -445,11 +446,20 @@ public class SwingDragAndDropPage implements FeaturePage {
             robot.glide(start, plan.to(), 24, 15);
             DesktopSupport.sleep(250);
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
-            DesktopSupport.await(() -> log.exported, 4000);
+            // the drag loop of the operating system may miss the release of the button until the next input
+            robot.finishDrop(plan.to(), () -> log.started, () -> log.exported);
             outcome = null;
             if (log.imported) {
                 break;
             }
+            if (log.started && !log.exported) {
+                // a drag that never ends is not retried (as in dt-dnd) : another attempt would only fail with "Drag and
+                // drop in progress", the checks below show the state reached
+                RobotSession.logRetry("dt-dnd-swing " + name, attempt, "the drag did not end");
+                break;
+            }
+            RobotSession.logRetry("dt-dnd-swing " + name, attempt, !log.started ? "the drag did not start"
+                    : "nothing imported, exportDone " + log.done);
             DesktopSupport.sleep(300);
         }
         checks.add(Check.attempts(name, attempt));
@@ -473,6 +483,8 @@ public class SwingDragAndDropPage implements FeaturePage {
      */
     static final class DropLog {
 
+        /** A drag gesture was recognized : the source handler created its transferable. */
+        volatile boolean started;
         volatile boolean imported;
         volatile boolean exported;
         String target;
@@ -481,6 +493,7 @@ public class SwingDragAndDropPage implements FeaturePage {
         String done;
 
         synchronized void reset() {
+            started = false;
             imported = false;
             exported = false;
             target = null;
@@ -531,6 +544,7 @@ public class SwingDragAndDropPage implements FeaturePage {
 
         @Override
         protected Transferable createTransferable(JComponent c) {
+            log.started = true;
             return new StringSelection(((JList<?>) c).getSelectedValue().toString());
         }
 
@@ -584,7 +598,11 @@ public class SwingDragAndDropPage implements FeaturePage {
         protected Transferable createTransferable(JComponent c) {
             TreePath path = ((JTree) c).getSelectionPath();
             DefaultMutableTreeNode node = path == null ? null : (DefaultMutableTreeNode) path.getLastPathComponent();
-            return node == null || !node.isLeaf() ? null : new StringSelection(String.valueOf(node.getUserObject()));
+            if (node == null || !node.isLeaf()) {
+                return null;
+            }
+            log.started = true;
+            return new StringSelection(String.valueOf(node.getUserObject()));
         }
 
         @Override

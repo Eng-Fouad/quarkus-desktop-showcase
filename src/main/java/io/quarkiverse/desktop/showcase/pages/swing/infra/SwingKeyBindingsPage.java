@@ -783,6 +783,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
         Typing outcome = typeOnce(u);
         int attempt = 1;
         while (!outcome.complete() && attempt < ATTEMPTS) {
+            RobotSession.logRetry("swing-keybindings Robot typing", attempt, outcome.reason());
             attempt++;
             JTextField field = u.robotField;
             java.awt.Window window = onEdt(() -> SwingUtilities.getWindowAncestor(field));

@@ -11,6 +11,7 @@ import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -22,7 +23,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.IntPredicate;
+
+import org.jboss.logging.Logger;
 
 /**
  * Robot input for the pages that need the focus ({@link FeaturePage#needsFocus()}), from a background thread only
@@ -52,6 +56,8 @@ import java.util.function.IntPredicate;
  * first mismatch.
  */
 public final class RobotSession implements AutoCloseable {
+
+    private static final Logger LOG = Logger.getLogger(RobotSession.class);
 
     /** The longest wait for the event of a key press or release. */
     public static final long KEY_WAIT_MILLIS = 1000;
@@ -296,6 +302,39 @@ public final class RobotSession implements AutoCloseable {
         return true;
     }
 
+    /**
+     * Waits until a drag and drop ended after the release of the button ({@code ended}, at most 4 s : slow drops were
+     * seen at 150 %). The drag loop of the operating system may miss the release until the next input (Windows, JVM
+     * runs : the drag ended when the next drag pressed the button). When the drag started ({@code started} : no input
+     * into the page otherwise), a small move over the drop target, then a click on it, end the loop (the drop then
+     * fails or succeeds, the caller checks). The click is made only while a showcase window is focused ({@link #press})
+     * and, on Windows, only where the window under the target belongs to this process
+     * ({@link Foreground#thisProcessAt}). Call it before {@link #releaseAll()} : the modifier keys of the drag stay
+     * pressed until the drop is done (the drag loop reads them when it handles the release of the button). At most
+     * 11 s.
+     *
+     * @return {@code true} when the drag ended
+     */
+    public boolean finishDrop(Point target, BooleanSupplier started, BooleanSupplier ended) {
+        if (Focus.await(ended, 4000)) {
+            return true;
+        }
+        if (!started.getAsBoolean()) {
+            return false;
+        }
+        move(new Point(target.x + 1, target.y + 1));
+        if (Focus.await(ended, 3000)) {
+            return true;
+        }
+        if (Boolean.FALSE.equals(Foreground.thisProcessAt(target))) {
+            LOG.infof("drop at %d,%d not ended : no click, the window under the target belongs to another process",
+                    target.x, target.y);
+            return false;
+        }
+        click(InputEvent.BUTTON1_DOWN_MASK);
+        return Focus.await(ended, 4000);
+    }
+
     public void wheel(int notches) {
         robot.mouseWheel(notches);
         if (idleAfterInput) {
@@ -370,11 +409,13 @@ public final class RobotSession implements AutoCloseable {
      * most {@code maxRaises} raises. Unlike {@link #awaitVisible} a negative probe works (e.g. "not the color of the
      * backdrop" when the content varies). A focused window may still be covered : always-on-top windows keep the order
      * they were mapped in without a window manager (X11), and a window manager restacking the windows it manages may
-     * cover an override-redirect window (Window.Type.POPUP) it does not manage.
+     * cover an override-redirect window (Window.Type.POPUP) it does not manage. Each raise is logged
+     * ({@link #logRetry}, {@code action} and the pixel found).
      *
      * @return the number of raises it took ({@code 0} : visible at once), {@code -1} if still covered
      */
-    public int raiseUntil(Window window, Point p, IntPredicate visible, int maxRaises, long waitMillis) throws Exception {
+    public int raiseUntil(String action, Window window, Point p, IntPredicate visible, int maxRaises, long waitMillis)
+            throws Exception {
         for (int raises = 0;; raises++) {
             if (waitForPixel(p, visible, waitMillis)) {
                 return raises;
@@ -382,6 +423,7 @@ public final class RobotSession implements AutoCloseable {
             if (raises >= maxRaises) {
                 return -1;
             }
+            logRetry(action, raises + 1, "covered : " + lastMismatch);
             Focus.onEdt(() -> {
                 window.toFront();
                 return null;
@@ -481,6 +523,15 @@ public final class RobotSession implements AutoCloseable {
         if (pointer != null) {
             robot.mouseMove(pointer.x, pointer.y);
         }
+    }
+
+    /**
+     * Logs that an attempt of an action on the live desktop was incomplete (the attempts are recorded with
+     * {@link Check#attempts}) : what was missing, for the analysis of the runs (never in a check value : it depends on
+     * the desktop).
+     */
+    public static void logRetry(String action, int attempt, Object missing) {
+        LOG.infof("%s : attempt %d incomplete (%s ; foreground : %s)", action, attempt, missing, Foreground.describe());
     }
 
     /**

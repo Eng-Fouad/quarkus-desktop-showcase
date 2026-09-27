@@ -528,7 +528,8 @@ public class AwtWindowsPage implements FeaturePage {
                         if (Platforms.isLinux()) {
                             Rectangle popupBounds = inner(cell(area, 5));
                             Point popupCenter = new Point((int) popupBounds.getCenterX(), popupBounds.y + 30);
-                            robot.raiseUntil(popup, popupCenter, rgb -> rgb == POPUP_COLOR, 5, 300);
+                            robot.raiseUntil("awt-windows POPUP window above the others", popup, popupCenter,
+                                    rgb -> rgb == POPUP_COLOR, 5, 300);
                         }
                         return robot.capture(area);
                     }

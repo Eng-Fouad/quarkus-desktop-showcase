@@ -543,6 +543,7 @@ public class AwtFocusPage implements FeaturePage {
         })).thenCompose(sent -> Edt.rounds(3).thenApply(v -> sent)).thenCompose(sent -> {
             java.util.List<String> gained = gained(comps);
             if (!String.join(", ", gained).equals(EXPECTED_TABS) && attempt < ATTEMPTS) {
+                RobotSession.logRetry("awt-focus Tab, Tab, Shift+Tab", attempt, gained);
                 return robotTabs(comps, checks, attempt + 1);
             }
             checks.add(Check.attempts("Robot Tab, Tab, Shift+Tab", attempt));
@@ -587,6 +588,7 @@ public class AwtFocusPage implements FeaturePage {
                     boolean complete = keys.equals("dispatcher KEY_PRESSED KEY_RELEASED / canvas F9")
                             && post.equals("KEY_PRESSED KEY_RELEASED") && owner.equals("cycle");
                     if (!complete && attempt < ATTEMPTS) {
+                        RobotSession.logRetry("awt-focus F7, F9, Right", attempt, keys + " / " + post + " / " + owner);
                         return robotKeys(comps, checks, dispatched, postProcessed, canvasKeys, attempt + 1);
                     }
                     checks.add(Check.attempts("Robot F7, F9, Right", attempt));

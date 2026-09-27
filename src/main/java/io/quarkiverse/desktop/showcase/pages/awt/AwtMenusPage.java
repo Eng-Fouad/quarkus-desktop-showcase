@@ -565,7 +565,7 @@ public class AwtMenusPage implements FeaturePage {
             // them in the order they were mapped (the backdrop last). The frame is focused (Focus.acquire) but may
             // still be covered : raised again while the canvas center shows the backdrop (the content varies)
             Point center = new Point(canvas.x + size.width / 2, canvas.y + size.height / 2);
-            robot.raiseUntil(m.frame, center, rgb -> rgb != BACKDROP, 5, 200);
+            robot.raiseUntil("awt-menus menu frame above the backdrop", m.frame, center, rgb -> rgb != BACKDROP, 5, 200);
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
 
@@ -582,6 +582,8 @@ public class AwtMenusPage implements FeaturePage {
                     }
                 }
                 if (file == null) {
+                    RobotSession.logRetry("awt-menus " + open, attempt, "the File menu did not open, skipped "
+                            + robot.skipped());
                     closeMenus(robot);
                 }
             }
@@ -611,6 +613,8 @@ public class AwtMenusPage implements FeaturePage {
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
                 if (!activated) {
+                    RobotSession.logRetry("awt-menus " + open + ", Enter", attempt, "no action, skipped "
+                            + robot.skipped());
                     closeMenus(robot);
                 }
             }
@@ -632,6 +636,8 @@ public class AwtMenusPage implements FeaturePage {
                     activated = waitFor(robot, () -> !m.events.isEmpty());
                 }
                 if (!activated) {
+                    RobotSession.logRetry("awt-menus " + view, attempt, "no item event, skipped "
+                            + robot.skipped());
                     closeMenus(robot);
                 }
             }

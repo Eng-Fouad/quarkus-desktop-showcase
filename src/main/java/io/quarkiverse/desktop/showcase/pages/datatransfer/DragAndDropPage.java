@@ -262,6 +262,7 @@ public class DragAndDropPage implements FeaturePage {
             }
             if (!robot.awaitVisible(plan.component(), plan.probes())) {
                 outcome = "skipped: the page is not visible on screen";
+                RobotSession.logRetry("dt-dnd " + name, attempt, "covered : " + robot.lastMismatch());
                 continue;
             }
             if (copy && !robot.keyPress(KeyEvent.VK_CONTROL)) {
@@ -279,36 +280,40 @@ public class DragAndDropPage implements FeaturePage {
             robot.glide(start, plan.to(), 24, 15);
             DesktopSupport.sleep(200);
             outcome = null;
-            if (log.started && !DesktopSupport.await(() -> log.overAction == expectedAction, 1500)) {
-                // the drop would use another action (the modifier keys reached the drag loop late) : cancelled
-                robot.nativeKeys(true);
-                robot.key(KeyEvent.VK_ESCAPE);
-                robot.nativeKeys(false);
+            // the drop target must see the drag with the expected action before the button is released : the drag
+            // started late, or the modifier keys reached the drag loop late (a copy would become a move)
+            if (!DesktopSupport.await(() -> log.overAction == expectedAction, 1500)) {
+                if (log.started) {
+                    // cancelled : nothing is dropped
+                    robot.nativeKeys(true);
+                    robot.key(KeyEvent.VK_ESCAPE);
+                    robot.nativeKeys(false);
+                }
                 robot.release(InputEvent.BUTTON1_DOWN_MASK);
                 robot.releaseAll();
-                DesktopSupport.await(() -> log.ended, 4000);
-                outcome = "skipped: the drop action stayed " + action(log.overAction);
+                if (log.started) {
+                    DesktopSupport.await(() -> log.ended, 4000);
+                }
+                outcome = "skipped: the drop target saw " + action(log.overAction) + " instead of " + action(expectedAction);
+                RobotSession.logRetry("dt-dnd " + name, attempt, outcome);
                 DesktopSupport.sleep(300);
                 continue;
             }
             robot.release(InputEvent.BUTTON1_DOWN_MASK);
+            // the modifier keys stay pressed until the drop is done : the drag loop reads their state when it handles
+            // the release of the button (Ctrl released too early turned a copy into a move)
+            robot.finishDrop(plan.to(), () -> log.started, () -> log.ended);
             robot.releaseAll();
-            DesktopSupport.await(() -> log.ended, 4000);
             if (log.ended && log.success) {
                 break;
             }
-            if (log.started && !log.ended) {
-                // a slow drop (seen at 150 %) : wait longer. A drag that never ends (e.g. the native drag and drop
-                // callbacks are missing) is not retried : another attempt would only fail with "Drag and drop in
-                // progress", the checks below show the state reached
-                DesktopSupport.await(() -> log.ended, 4000);
-                if (!log.ended) {
-                    break;
-                }
-                if (log.success) {
-                    break;
-                }
+            if (!log.ended) {
+                // a drag that never ends (e.g. the native drag and drop callbacks are missing) is not retried : another
+                // attempt would only fail with "Drag and drop in progress", the checks below show the state reached
+                break;
             }
+            // the drop failed (nothing was dropped) : done again
+            RobotSession.logRetry("dt-dnd " + name, attempt, "drop failed, target events " + log.targetEvents);
             DesktopSupport.sleep(300);
         }
         checks.add(Check.attempts(name, attempt));

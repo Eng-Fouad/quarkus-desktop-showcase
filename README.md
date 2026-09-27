@@ -129,14 +129,19 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   GraalVM tracing agent, then `tools/MetadataDiff.java` lists the JNI, reflection, resource, bundle, serialization and
   proxy accesses of the JDK desktop modules that quarkus-desktop does not register for the current platform:
   `java tools/MetadataDiff.java comparison/trace/metadata/reachability-metadata.json [windows|linux|mac] [--awt-only]
-  [--no-java-beans]`.
+  [--no-java-beans] [--repository=path]`.
   It reads the `static String[]` lists of `io.quarkiverse.desktop.awt.deployment.AwtClassesAndResources` and
-  `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2`,
+  `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2` (or
+  in the local Maven repository given with `--repository`, e.g. a copy of the Docker volume of the Linux cycle),
   understands package entries, `fqcn#member` entries and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
-  `java-beans.jdk-classes` properties), the constants of the extension code (`*SERIALIZABLE*` classes, and the
+  `java-beans.jdk-classes` properties), the lists of `--exact-reachability-metadata` builds (`REFLECTIVE_TYPES`,
+  `NEGATIVE_CLASS_LOOKUPS`, `METHOD_LOOKUPS`), the constants of the extension code (`*SERIALIZABLE*` classes, and the
   `ABSENT_RESOURCE_BUNDLES` that the JDK looks up but does not have), and also lists stale entries (names that do not
-  exist in the JDK) and the lookups of classes and resources that do not exist in the JDK (expected to fail).
+  exist in the JDK) and the lookups of classes and resources that do not exist in the JDK (expected to fail, only an
+  issue with `--exact-reachability-metadata`; the class lookups that quarkus-desktop registers for it, the
+  `NEGATIVE_CLASS_LOOKUPS`, the JavaBeans probes of its classes and the lookups of the absent bundles, are only
+  counted).
 - `java tools/ClinitAudit.java [windows|linux|mac] [--awt-only] [class_initialization_report.csv]`: lists the JDK desktop
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
@@ -244,7 +249,9 @@ public class ShapesPage implements FeaturePage {
     500 ms with `Edt.awaitFocus`), waits for each key press and release to be dispatched before the next input (a
     modifier pressed too early or released too late changes the result), restores the pointer and releases everything
     when closed; `nativeKeys(true)` for keys that a native loop consumes (Windows menu loop, X11 menu grabs),
-    `idleAfterInput(false)` during a drag and drop;
+    `idleAfterInput(false)` during a drag and drop, `finishDrop` for a drag whose button release the drag loop missed
+    (a small move, then a click on the drop target, only once the drag started), the modifier keys held until the drop
+    is done;
   - windows are placed, painted and stacked asynchronously, above all on X11: `Focus.awaitPlaced` before Robot
     coordinates are computed from a window location (a bare X server confirms it after the focus, sometimes),
     `RobotSession.waitForPixel` until a new window is painted (X11 shows its unpainted native background until then),
@@ -257,7 +264,9 @@ public class ShapesPage implements FeaturePage {
     tell) and the pixel waits stop early when the denial is known;
   - a Robot sequence whose effect is missing is done again (bounded, the window focused again first), and the number
     of attempts is recorded with `Check.attempts(action, n)`: an informational check in `report.json` only (not painted
-    by `ChecksView`), whose differences `Compare` reports as `attempts:` notes, not as mismatches.
+    by `ChecksView`), whose differences `Compare` reports as `attempts:` notes, not as mismatches. What was missing is
+    logged with `RobotSession.logRetry` (with the foreground owner on Windows), in the log only: it depends on the
+    desktop, never put it in a check value.
 - **Shared helpers**: `core.Grid` (captioned tiles painted offscreen, pixel probes) and `core.Slot` (an image shown once
   ready), `core.RobotSession`, `core.Focus`.
 - **Safety** (the showcase runs on real desktops): never print to a real printer (only `StreamPrintService` PostScript
