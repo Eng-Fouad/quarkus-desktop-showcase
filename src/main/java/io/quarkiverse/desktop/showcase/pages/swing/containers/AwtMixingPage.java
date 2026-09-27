@@ -313,6 +313,10 @@ public class AwtMixingPage implements FeaturePage {
         expected.put("clipped button: inside its parent", null);
         Rectangle area = new Rectangle(s.area.getLocationOnScreen(), s.area.getSize());
         GraphicsConfiguration gc = s.area.getGraphicsConfiguration();
+        // macOS : Robot reads the screen through the color profile of the display (see RobotSession.COLOR_TOLERANCE) :
+        // the points without an expected color (the native buttons) are read against the area printed with its
+        // heavyweight components
+        BufferedImage printed = RobotSession.COLOR_TOLERANCE > 0 ? printedWithHeavyweights(s) : null;
         Point reference = points.get("reference");
         Point canvas = points.get("canvas beside the popup");
         Point popup = points.get("popup over the canvas");
@@ -326,17 +330,23 @@ public class AwtMixingPage implements FeaturePage {
                     // the window may have lost the focus meanwhile, or be covered by another window : the pixels are
                     // then those of another window
                     boolean stillFocused = Edt.ownsFocus();
-                    boolean covered = result.getKey().get("reference") != REFERENCE_TEAL;
+                    boolean covered = !RobotSession.sameColor(result.getKey().get("reference"), REFERENCE_TEAL);
                     result.getKey().forEach((name, rgb) -> {
                         Integer want = expected.get(name);
-                        String value = String.format(java.util.Locale.ROOT, "#%06X", rgb);
                         if (!stillFocused || covered) {
                             checks.add(Check.info("pixel " + name, !stillFocused ? "skipped: focus lost"
                                     : RobotSession.screenCaptureDenied() ? "skipped: screen capture denied"
                                             : "skipped: window covered"));
                         } else if (want == null) {
-                            checks.add(Check.info("pixel " + name, value));
+                            Point p = points.get(name);
+                            int x = p.x - area.x;
+                            int y = p.y - area.y;
+                            int shown = printed == null || x < 0 || y < 0 || x >= printed.getWidth()
+                                    || y >= printed.getHeight() ? rgb : RobotSession.snap(rgb, printed.getRGB(x, y));
+                            checks.add(Check.info("pixel " + name, String.format(java.util.Locale.ROOT, "#%06X", shown)));
                         } else {
+                            // the expected color when the pixel is within the tolerance of the platform
+                            String value = String.format(java.util.Locale.ROOT, "#%06X", RobotSession.snap(rgb, want));
                             String wanted = String.format(java.util.Locale.ROOT, "#%06X", want);
                             checks.add(Check.of("pixel " + name, wanted.equals(value), wanted.equals(value) ? value
                                     : "expected " + wanted + " but got " + value));
@@ -381,7 +391,8 @@ public class AwtMixingPage implements FeaturePage {
                     return Map.entry(colors, capture);
                 }))
                 .thenCompose(result -> {
-                    boolean lost = !Edt.ownsFocus() || result.getKey().get("reference") != REFERENCE_TEAL;
+                    boolean lost = !Edt.ownsFocus()
+                            || !RobotSession.sameColor(result.getKey().get("reference"), REFERENCE_TEAL);
                     // no retry when the screen pixels are known not to show the window (macOS permission)
                     if (lost && attempt < ATTEMPTS && !RobotSession.screenCaptureDenied()) {
                         RobotSession.logRetry("swing-awt-mixing screen pixels", attempt, "focus or window lost");
