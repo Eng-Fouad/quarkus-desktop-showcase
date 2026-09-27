@@ -47,6 +47,7 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
@@ -166,7 +167,10 @@ public class XmlPersistencePage implements FeaturePage {
         awtChecks.add(Checks.expect("menu bar : round trip (the JDK keeps the help menu only)",
                 "MenuBar [Menu \"Help\" [MenuItem \"About\"]] help none", () -> describe(
                         (MenuBar) XmlSupport.decode(menuXml.xml(), null).objects().get(0))));
-        awtChecks.add(Checks.expect("menu bar : encoded", "MenuBar [Menu \"File\" [MenuItem \"Print...\" Ctrl+P, "
+        // MenuShortcut.toString names the menu shortcut modifier of the platform (Toolkit.getMenuShortcutKeyMaskEx :
+        // Command, "⌘", on macOS) with InputEvent.getModifiersExText
+        awtChecks.add(Checks.expect("menu bar : encoded", "MenuBar [Menu \"File\" [MenuItem \"Print...\" "
+                + Keys.join(Keys.menuShortcutName(), "P") + ", "
                 + "CheckboxMenuItem \"Landscape\" true, MenuItem \"-\", Menu \"Recent\" [MenuItem \"report.ps\"]], "
                 + "Menu \"Help\" [MenuItem \"About\"]] help Help", () -> describe(menuBar)));
         awtChecks.add(Checks.expect("menu bar : encoding exceptions", "none", () -> exceptions(menuXml.exceptions())));

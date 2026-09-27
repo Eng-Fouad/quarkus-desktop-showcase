@@ -48,6 +48,7 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.Focus;
+import io.quarkiverse.desktop.showcase.core.Keys;
 import io.quarkiverse.desktop.showcase.core.Platforms;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
@@ -318,8 +319,16 @@ public class AwtMenusPage implements FeaturePage {
 
     // ------------------------------------------------------------------------------------------------ model checks
 
+    /**
+     * The shortcut and key texts are those of the platform ({@link Keys}) : {@code MenuShortcut.toString} joins
+     * {@code InputEvent.getModifiersExText} of {@code Toolkit.getMenuShortcutKeyMaskEx()} ({@code META_DOWN_MASK},
+     * Command, in {@code LWCToolkit} : "⌘") and {@code KeyEvent.getKeyText}, which read {@code Toolkit.getProperty} :
+     * on macOS first the {@code sun.awt.resources.awtosx} bundle that {@code LWCToolkit} installs as the platform
+     * resources ("⌃ ⇧ ⌥ ⌦"), then the shared {@code sun.awt.resources.awt} bundle ("Ctrl Shift Alt Delete").
+     */
     private static List<Check> modelChecks(MenuFrame m) {
         List<Check> checks = new ArrayList<>();
+        String menuKey = Keys.menuShortcutName();
         checks.add(Checks.expect("MenuBar menus / help menu", "File Edit View Help / Help", () -> {
             List<String> labels = new ArrayList<>();
             for (int i = 0; i < m.bar.getMenuCount(); i++) {
@@ -329,14 +338,16 @@ public class AwtMenusPage implements FeaturePage {
         }));
         checks.add(Checks.expect("File items (separators are \"-\")", "New Open... Save - Recent files - Exit",
                 () -> labels(m.file)));
-        checks.add(Checks.expect("MenuShortcut.toString (New, Select all, Delete)", "Ctrl+N Ctrl+Shift+A Ctrl+Delete",
+        checks.add(Checks.expect("MenuShortcut.toString (New, Select all, Delete)", Keys.join(menuKey, "N") + " "
+                + Keys.join(menuKey, "Shift", "A") + " " + Keys.join(menuKey, "Delete"),
                 () -> m.newItem.getShortcut() + " " + m.selectAll.getShortcut() + " "
                         + m.edit.getItem(m.edit.getItemCount() - 1).getShortcut()));
         checks.add(Checks.expect("MenuShortcut key / usesShiftModifier / equals", "78 false / 65 true / true",
                 () -> m.newItem.getShortcut().getKey() + " " + m.newItem.getShortcut().usesShiftModifier() + " / "
                         + m.selectAll.getShortcut().getKey() + " " + m.selectAll.getShortcut().usesShiftModifier() + " / "
                         + m.newItem.getShortcut().equals(new MenuShortcut(KeyEvent.VK_N, false))));
-        checks.add(Checks.expect("MenuBar.shortcuts() count / getShortcutMenuItem(Ctrl+S)", "9 / Save", () -> {
+        checks.add(Checks.expect("MenuBar.shortcuts() count / getShortcutMenuItem(" + Keys.join(menuKey, "S") + ")",
+                "9 / Save", () -> {
             int count = Collections.list(m.bar.shortcuts()).size();
             return count + " / " + m.bar.getShortcutMenuItem(new MenuShortcut(KeyEvent.VK_S)).getLabel();
         }));
@@ -383,11 +394,12 @@ public class AwtMenusPage implements FeaturePage {
                     ItemEvent.SELECTED));
             return m.events.removeLast();
         }));
-        checks.add(Checks.expect("Toolkit shortcut texts (sun.awt.resources.awt bundle)", "Ctrl Shift Alt",
+        checks.add(Checks.expect("Toolkit shortcut texts (sun.awt.resources.awt bundle)",
+                Keys.text("Ctrl") + " " + Keys.text("Shift") + " " + Keys.text("Alt"),
                 () -> Toolkit.getProperty("AWT.control", "?") + " " + Toolkit.getProperty("AWT.shift", "?") + " "
                         + Toolkit.getProperty("AWT.alt", "?")));
         checks.add(Checks.expect("InputEvent.getModifiersExText(CTRL | SHIFT) / KeyEvent.getKeyText(F10, DELETE)",
-                "Ctrl+Shift / F10 Delete",
+                Keys.join("Ctrl", "Shift") + " / F10 " + Keys.text("Delete"),
                 () -> InputEvent.getModifiersExText(InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK) + " / "
                         + KeyEvent.getKeyText(KeyEvent.VK_F10) + " " + KeyEvent.getKeyText(KeyEvent.VK_DELETE)));
         return checks;
@@ -420,9 +432,19 @@ public class AwtMenusPage implements FeaturePage {
                 .thenCompose(v -> bareInsets(frame.getBounds()))
                 .thenCompose(without -> {
                     Insets with = frame.getInsets();
-                    checks.add(Checks.expect("Frame insets : the menu bar adds to the top inset", "true, same left/right",
-                            () -> (with.top > without.top) + ", " + (with.left == without.left && with.right == without.right
-                                    ? "same left/right" : "different left/right")));
+                    // macOS : the MenuBar of a Frame is the screen menu bar, outside the window
+                    // (LWWindowPeer.setMenuBar hands it to CPlatformWindow.setMenuBar, the menu bar of the application
+                    // while the frame is active), and the insets are those of the NSWindow alone
+                    // (CPlatformWindow.getInsets : nativeGetNSWindowInsets, the title bar) : the same insets with and
+                    // without the menu bar
+                    checks.add(Platforms.isMac()
+                            ? Checks.expect("Frame insets : the menu bar adds to the top inset", "false, same insets",
+                                    () -> (with.top > without.top) + ", " + (with.equals(without) ? "same insets"
+                                            : "different insets " + with + " / " + without))
+                            : Checks.expect("Frame insets : the menu bar adds to the top inset", "true, same left/right",
+                                    () -> (with.top > without.top) + ", "
+                                            + (with.left == without.left && with.right == without.right
+                                                    ? "same left/right" : "different left/right")));
                     if (!ShowcaseMode.snapshot() || !ShowcaseMode.realInput()) {
                         checks.add(Check.info("native menus with the keyboard", "skipped: snapshot mode only"));
                         return CompletableFuture.completedFuture(null);
@@ -451,7 +473,9 @@ public class AwtMenusPage implements FeaturePage {
         // posted events : processed later
         return Edt.until(() -> m.events.size() >= 3, 3000, "shortcut events").handle((v, error) -> {
             List<String> events = new ArrayList<>(m.events);
-            checks.add(Checks.expect("shortcuts Ctrl+N, Ctrl+S (disabled item), Ctrl+Shift+A, Ctrl+Delete",
+            String menuKey = Keys.menuShortcutName();
+            checks.add(Checks.expect("shortcuts " + Keys.join(menuKey, "N") + ", " + Keys.join(menuKey, "S")
+                    + " (disabled item), " + Keys.join(menuKey, "Shift", "A") + ", " + Keys.join(menuKey, "Delete"),
                     "action New, action Select all, action Delete", () -> String.join(", ", events)));
             m.events.clear();
             return null;
