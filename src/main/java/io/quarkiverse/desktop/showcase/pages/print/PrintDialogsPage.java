@@ -27,6 +27,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
+import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleAction;
 import javax.accessibility.AccessibleContext;
 import javax.print.DocFlavor;
@@ -323,7 +324,8 @@ public class PrintDialogsPage implements FeaturePage {
         checks.add(Checks.expect(key + " : tabs", pageSetup ? "" : "General, Page Setup, Appearance",
                 () -> String.join(", ", AccessibleDump.names(dialog, "page tab"))));
         checks.add(Checks.expect(key + " : buttons", pageSetup ? "OK, Cancel" : "Properties..., Print, Cancel",
-                () -> String.join(", ", AccessibleDump.names(dialog, "push button").stream()
+                () -> String.join(", ", AccessibleDump.byRole(dialog, "push button").stream()
+                        .filter(button -> !inComboBox(button)).map(button -> String.valueOf(button.getAccessibleName()))
                         .filter(name -> !name.isEmpty() && !name.equals("null")).toList())));
         checks.add(Checks.expect(key + " : radio buttons", pageSetup
                 ? "Portrait, Landscape, Reverse Portrait, Reverse Landscape"
@@ -439,5 +441,21 @@ public class PrintDialogsPage implements FeaturePage {
             g.setColor(new java.awt.Color(0xB0BEC5));
             g.drawRect(0, 0, width - 1, height - 1);
         });
+    }
+
+    /**
+     * Whether a push button belongs to a combo box : the arrow button of an Aqua combo box (macOS) is a push button named
+     * after the selected item (the combo boxes of the other look and feels name theirs with an empty name).
+     */
+    private static boolean inComboBox(AccessibleContext button) {
+        Accessible parent = button.getAccessibleParent();
+        for (int depth = 0; parent != null && parent.getAccessibleContext() != null && depth < 4; depth++) {
+            AccessibleContext context = parent.getAccessibleContext();
+            if (AccessibleDump.role(context).equals("combo box")) {
+                return true;
+            }
+            parent = context.getAccessibleParent();
+        }
+        return false;
     }
 }
