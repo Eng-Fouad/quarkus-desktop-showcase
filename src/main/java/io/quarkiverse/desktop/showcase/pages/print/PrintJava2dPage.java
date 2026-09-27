@@ -15,11 +15,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import javax.print.DocFlavor;
 import javax.print.DocPrintJob;
+import javax.print.PrintServiceLookup;
 import javax.print.SimpleDoc;
 import javax.print.StreamPrintService;
 import javax.print.attribute.HashPrintRequestAttributeSet;
@@ -267,15 +269,7 @@ public class PrintJava2dPage implements FeaturePage {
             checks.add(Check.pass("PrinterJob.setPrintService(stream service)", job.getPrintService().getName()));
             // WPrinterJob asks the driver of the default printer (native), PSPrinterJob the print service attributes
             checks.add(Checks.info("PrinterJob.defaultPage()", () -> PrintSupport.describe(job.defaultPage())));
-            checks.add(Checks.expect("PrinterJob.getPageFormat(ISO_A4, LANDSCAPE, 10 mm margins)",
-                    "LANDSCAPE 841.89x595.28 imageable 28.35,28.35 785.20x538.58", () -> {
-                        PrintRequestAttributeSet attributes = new HashPrintRequestAttributeSet();
-                        attributes.add(MediaSizeName.ISO_A4);
-                        attributes.add(OrientationRequested.LANDSCAPE);
-                        attributes.add(new MediaPrintableArea(10, 10, 190, 277, MediaPrintableArea.MM));
-                        PageFormat format = job.getPageFormat(attributes);
-                        return PrintSupport.orientation(format.getOrientation()) + " " + PrintSupport.describe(format);
-                    }));
+            checks.add(pageFormat(job));
             checks.add(Checks.info("PrinterJob.validatePage(imageable area larger than the paper)", () -> {
                         PageFormat format = new PageFormat();
                         Paper paper = new Paper();
@@ -379,5 +373,36 @@ public class PrintJava2dPage implements FeaturePage {
                     }
                 }));
         return new Result(checks, excerpt);
+    }
+
+    /**
+     * {@code PrinterJob.getPageFormat} of A4 landscape with 10 mm margins. It ends with {@code validatePage}
+     * (java.awt.print.PrinterJob.getPageFormat), {@code RasterPrinterJob.validatePage} calling {@code validatePaper}.
+     */
+    private static Check pageFormat(PrinterJob job) {
+        String name = "PrinterJob.getPageFormat(ISO_A4, LANDSCAPE, 10 mm margins)";
+        Callable<String> action = () -> {
+            PrintRequestAttributeSet attributes = new HashPrintRequestAttributeSet();
+            attributes.add(MediaSizeName.ISO_A4);
+            attributes.add(OrientationRequested.LANDSCAPE);
+            attributes.add(new MediaPrintableArea(10, 10, 190, 277, MediaPrintableArea.MM));
+            PageFormat format = job.getPageFormat(attributes);
+            return PrintSupport.orientation(format.getOrientation()) + " " + PrintSupport.describe(format);
+        };
+        if (!Platforms.isMac()) {
+            return Checks.expect(name, "LANDSCAPE 841.89x595.28 imageable 28.35,28.35 785.20x538.58", action);
+        }
+        // CPrinterJob.validatePaper is native (CPrinterJob.m) and ignores the print service of the job : the paper is
+        // set on a copy of the NSPrintInfo of the default printer, which replaces its size by the size of the matching
+        // paper of the printer, and makeBestFit raises each margin to the imageable area of that paper. The default
+        // printer decides : with no printer, it is the Generic Printer of macOS (PrintCore GenericPrinter.ppd, A4
+        // "595.00 842.00", imageable "18.00 41.00 577.00 824.00" : 18 pt margins, 41 pt at the bottom). The 10 mm
+        // (28.35 pt) margins stay, the bottom one becomes 41 pt, on a 595x842 paper : landscape 842x595, imageable
+        // x = 842 - 28.35 - 772.65 = 41. PrinterJob.defaultPage() shows the same printer (595x842, 18 / 41 pt margins)
+        if (PrintServiceLookup.lookupPrintServices(null, null).length > 0) {
+            // the margins and the paper sizes of the installed default printer (its PPD)
+            return Checks.info(name, action);
+        }
+        return Checks.expect(name, "LANDSCAPE 842.00x595.00 imageable 41.00,28.35 772.65x538.31", action);
     }
 }
