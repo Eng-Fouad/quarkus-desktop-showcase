@@ -64,21 +64,43 @@ public final class Keys {
             Map.entry("Equals", "="),
             Map.entry("Minus", "-"),
             Map.entry("Quote", "'"),
-            Map.entry("Back Quote", "`"));
+            Map.entry("Back Quote", "`"),
+            Map.entry("Double Quote", "\""),
+            Map.entry("Plus", "+"),
+            Map.entry("Asterisk", "*"),
+            Map.entry("Ampersand", "&"),
+            Map.entry("At", "@"),
+            Map.entry("Colon", ":"),
+            Map.entry("Circumflex", "^"),
+            Map.entry("Dollar", "$"),
+            Map.entry("Euro", "€"),
+            Map.entry("Number Sign", "#"),
+            Map.entry("Underscore", "_"),
+            Map.entry("Exclamation Mark", "!"),
+            Map.entry("Inverted Exclamation Mark", "¡"),
+            Map.entry("Left Parenthesis", "("),
+            Map.entry("Right Parenthesis", ")"),
+            // awtosx names both braces with a bracket
+            Map.entry("Left Brace", "["),
+            Map.entry("Right Brace", "]"),
+            Map.entry("Less", "<"),
+            Map.entry("Greater", ">"));
 
     private Keys() {
     }
 
     /**
      * The name of a key or a modifier on this platform, given its name on Windows and Linux : {@code "Shift"} is
-     * {@code "⇧"} on macOS ; a numeric keypad key {@code "NumPad-5"} is {@code "⌨-5"}. Other names are the same on
-     * every platform ({@code "A"}, {@code "F10"}).
+     * {@code "⇧"} on macOS ; a numeric keypad key {@code "NumPad-5"} is {@code "⌨-5"}, a keypad operator
+     * {@code "NumPad *"} is {@code "⌨ *"} ({@code AWT.multiply}, {@code AWT.add}, {@code AWT.subtract},
+     * {@code AWT.divide}, {@code AWT.decimal}, {@code AWT.separator}). Other names are the same on every platform
+     * ({@code "A"}, {@code "F10"}, {@code "Windows"}).
      */
     public static String text(String name) {
         if (!Platforms.isMac()) {
             return name;
         }
-        if (name.startsWith("NumPad-")) {
+        if (name.startsWith("NumPad-") || name.startsWith("NumPad ")) {
             return MAC_TEXTS.get("NumPad") + name.substring("NumPad".length());
         }
         return MAC_TEXTS.getOrDefault(name, name);
