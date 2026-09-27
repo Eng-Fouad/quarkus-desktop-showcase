@@ -47,6 +47,8 @@ import java.util.stream.Stream;
  * comparison/&lt;label&gt;/metadata (the agent comes with GraalVM : the java of GRAALVM_HOME is used if the current one
  * has no agent). Options after {@code --} are passed to the JVM (before -jar) or to the native executable. The default
  * label is the mode, suffixed with {@code -awt} and {@code -hidpi} for these variants.
+ * <p>
+ * Exit code 0 when the showcase exited normally and wrote its report, 1 otherwise (no report, a crash, the watchdog).
  */
 public class Snapshot {
 
@@ -98,6 +100,7 @@ public class Snapshot {
         }
         String mode = positional.get(0);
         String label = positional.size() > 1 ? positional.get(1) : defaultLabel(mode, o);
+        checkLabel(label);
         System.exit(run(mode, label, o));
     }
 
@@ -146,6 +149,17 @@ public class Snapshot {
             System.exit(2);
         }
         return name;
+    }
+
+    /**
+     * Exits (code 2) unless {@code label} is a single directory name : letters, digits, {@code .}, {@code _} and
+     * {@code -} (a label with spaces is usually options passed as one argument).
+     */
+    static void checkLabel(String label) {
+        if (!label.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) {
+            System.err.println("Invalid label '" + label + "' : letters, digits, '.', '_' and '-' only");
+            System.exit(2);
+        }
     }
 
     static String defaultLabel(String mode, Options o) {
@@ -250,14 +264,23 @@ public class Snapshot {
                         + " variant ?)";
             }
         }
-        // errors of missing native image metadata (with -XX:MissingRegistrationReportingMode=Warn : every one of them)
-        long missing = Files.readAllLines(log).stream().filter(l -> MISSING_METADATA.matcher(l).find()).count();
+        long missing = missingMetadata(log);
         if (missing > 0) {
             warning += " " + missing + " run.log lines about missing metadata (" + MISSING_METADATA.pattern() + ")";
         }
         System.out.println(label + ": exit=" + exit + ", " + images + " images, "
                 + (report ? "report.json written" : "NO report.json") + warning);
-        return report ? 0 : 1;
+        // a report written before a crash or the watchdog is not a successful run
+        return report && exit == 0 ? 0 : 1;
+    }
+
+    /**
+     * The lines of a run.log about missing native image metadata (with -XX:MissingRegistrationReportingMode=Warn : every
+     * one of them), without the note that GraalVM prints once in that mode.
+     */
+    static long missingMetadata(Path log) throws IOException {
+        return Files.readAllLines(log).stream().filter(l -> !l.startsWith("Note: "))
+                .filter(l -> MISSING_METADATA.matcher(l).find()).count();
     }
 
     /**

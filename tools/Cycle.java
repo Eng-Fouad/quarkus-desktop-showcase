@@ -11,8 +11,8 @@ import java.util.List;
  * comparison. Results: comparison/jvm-&lt;label&gt;, comparison/native-&lt;label&gt;, comparison/diff-&lt;label&gt;
  * (summary.txt, index.html), build logs in comparison/logs-&lt;label&gt;.
  * <p>
- * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline]
- * [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] [--maven-args=a,b]
+ * usage: java tools/Cycle.java &lt;label&gt; [--trace] [--exact] [--require-focus] [--skip-jvm] [--skip-native-build]
+ * [--offline] [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] [--maven-args=a,b]
  * [--native-args=a,b] [-- snapshot options...]
  * <p>
  * --awt-only builds and runs the AWT only variant (mvn -Dawt-only, target/awt-only). --hidpi runs both snapshot runs
@@ -21,8 +21,14 @@ import java.util.List;
  * Maven arguments for both builds. --native-args is a comma separated list of native-image options, e.g.
  * --native-args=-H:+PrintClassInitialization. --exact builds with --exact-reachability-metadata and runs the native
  * executable with -XX:MissingRegistrationReportingMode=Warn : the reflection, JNI and resource accesses missing from the
- * metadata are reported in the native run.log instead of failing silently or at the first one. Options after
- * {@code --} apply to both snapshot runs.
+ * metadata are reported in the native run.log instead of failing silently or at the first one. --require-focus fails
+ * the comparison when a page that needs the focus never got it (see tools/Compare.java : for unattended runs). Options
+ * after {@code --} apply to both snapshot runs. The native build gets
+ * {@code -Dquarkus.native.native-image-xmx=8g} unless --maven-args sets it.
+ * <p>
+ * Exit code 0 when every step succeeded and the runs match ; 1 when a build failed, a snapshot run failed (no report, a
+ * crash, the watchdog), the native run of --exact reported accesses missing from the metadata, or the comparison is not
+ * a MATCH (the cycle then still runs its remaining steps) ; 2 for a usage error.
  * <p>
  * Maven builds with the JDK running this tool : run it with GraalVM's java for native builds
  * ({@code $GRAALVM_HOME/bin/java tools/Cycle.java win1}), which also runs the JVM snapshots on GraalVM (the same JDK
@@ -37,12 +43,14 @@ public class Cycle {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0 || args[0].startsWith("--")) {
-            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--skip-jvm] [--skip-native-build] [--offline] "
-                    + "[--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] [--categories=names] "
-                    + "[--maven-args=a,b] [--native-args=a,b] [-- snapshot options...]");
+            System.err.println("usage: java tools/Cycle.java <label> [--trace] [--exact] [--require-focus] [--skip-jvm] "
+                    + "[--skip-native-build] [--offline] [--awt-only] [--hidpi] [--pipeline=gdi|opengl|x11] [--pages=ids] "
+                    + "[--categories=names] [--maven-args=a,b] [--native-args=a,b] [-- snapshot options...]");
             System.exit(2);
         }
         String label = args[0];
+        Snapshot.checkLabel(label);
+        boolean requireFocus = false;
         boolean trace = false;
         boolean skipJvm = false;
         boolean skipNativeBuild = false;
@@ -68,6 +76,8 @@ public class Cycle {
                 offline = true;
             } else if (arg.equals("--exact")) {
                 exact = true;
+            } else if (arg.equals("--require-focus")) {
+                requireFocus = true;
             } else if (arg.equals("--awt-only")) {
                 snapshot.awtOnly = true;
             } else if (arg.equals("--hidpi")) {
@@ -93,6 +103,8 @@ public class Cycle {
 
         Path logs = Path.of("comparison", "logs-" + label);
         Files.createDirectories(logs);
+        // what failed : the cycle goes on (the comparison shows the most), and exits 1 at the end
+        List<String> failures = new ArrayList<>();
 
         if (!skipJvm) {
             step("JVM build");
@@ -103,12 +115,16 @@ public class Cycle {
                 System.exit(1);
             }
             step("JVM snapshots");
-            Snapshot.run("jvm", "jvm-" + label, snapshot);
+            if (Snapshot.run("jvm", "jvm-" + label, snapshot) != 0) {
+                failures.add("JVM snapshots (comparison/jvm-" + label + "/run.log)");
+            }
             if (trace) {
                 step("JVM snapshots under the tracing agent");
                 Snapshot.Options traced = snapshot.copy();
                 traced.trace = true;
-                Snapshot.run("jvm", "trace-" + label, traced);
+                if (Snapshot.run("jvm", "trace-" + label, traced) != 0) {
+                    failures.add("JVM snapshots under the tracing agent (comparison/trace-" + label + "/run.log)");
+                }
                 Path metadata = Path.of("comparison", "trace-" + label, "metadata", "reachability-metadata.json");
                 Path diff = Path.of("comparison", "trace-" + label, "metadata-diff.md");
                 List<String> diffArgs = new ArrayList<>(List.of("tools/MetadataDiff.java", metadata.toString()));
@@ -125,8 +141,10 @@ public class Cycle {
 
         if (!skipNativeBuild) {
             step("native build");
-            List<String> build = new ArrayList<>(List.of("-B", "package", "-Dnative", "-DskipTests",
-                    "-Dquarkus.native.native-image-xmx=8g"));
+            List<String> build = new ArrayList<>(List.of("-B", "package", "-Dnative", "-DskipTests"));
+            if (mavenArgs.stream().noneMatch(a -> a.startsWith("-Dquarkus.native.native-image-xmx="))) {
+                build.add("-Dquarkus.native.native-image-xmx=8g");
+            }
             build.addAll(mavenArgs);
             List<String> additional = new ArrayList<>();
             if (exact) {
@@ -157,13 +175,38 @@ public class Cycle {
             // report every access missing from the metadata instead of failing at the first one
             snapshot.nativeOptions.add("-XX:MissingRegistrationReportingMode=Warn");
         }
-        Snapshot.run("native", "native-" + label, snapshot);
+        if (Snapshot.run("native", "native-" + label, snapshot) != 0) {
+            failures.add("native snapshots (comparison/native-" + label + "/run.log)");
+        }
+        if (exact) {
+            long missing = Snapshot.missingMetadata(Path.of("comparison", "native-" + label, "run.log"));
+            if (missing > 0) {
+                failures.add(missing + " run.log lines about accesses missing from the metadata (comparison/native-"
+                        + label + "/run.log)");
+            }
+        }
 
         step("compare");
         Path summary = logs.resolve("compare.txt");
-        java(summary, "tools/Compare.java", "comparison/jvm-" + label, "comparison/native-" + label,
-                "comparison/diff-" + label);
-        System.out.println(Files.readAllLines(summary).getFirst());
+        List<String> compare = new ArrayList<>(List.of("tools/Compare.java", "comparison/jvm-" + label,
+                "comparison/native-" + label, "comparison/diff-" + label));
+        if (requireFocus) {
+            compare.add("--require-focus");
+        }
+        int compared = java(summary, compare.toArray(String[]::new));
+        List<String> result = Files.readAllLines(summary);
+        String verdict = result.stream().filter(l -> l.startsWith("MATCH") || l.startsWith("MISMATCH")).findFirst()
+                .orElse(result.isEmpty() ? "no comparison" : result.getFirst());
+        System.out.println(verdict);
+        if (compared != 0) {
+            failures.add("comparison : " + verdict.split(" : ")[0] + " (comparison/diff-" + label + "/summary.txt)");
+        }
+
+        if (!failures.isEmpty()) {
+            step("cycle " + label + " FAILED : " + String.join(" ; ", failures));
+            System.exit(1);
+        }
+        step("cycle " + label + " OK");
     }
 
     /**

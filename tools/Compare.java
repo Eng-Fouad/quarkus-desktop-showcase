@@ -17,10 +17,12 @@ import javax.imageio.ImageIO;
  * Compares two snapshot runs (see tools/Snapshot.java) : environment, images pixel by pixel, checks value by value, and
  * errors.
  * <p>
- * usage: java tools/Compare.java comparison/jvm comparison/native comparison/diff [tolerance]
+ * usage: java tools/Compare.java comparison/jvm comparison/native comparison/diff [tolerance] [--require-focus]
  * <p>
  * Writes summary.txt, index.html and diff images into the output directory. Exit code 0 when both runs match and
- * none reported errors, 1 otherwise.
+ * none reported errors, 1 otherwise (two runs without any page or image do not match). {@code --require-focus} (for
+ * unattended runs, e.g. CI) also fails a page that needs the focus when it never got it in a run ({@code focusAttempts}
+ * 0) : its Robot input was skipped, even if both runs skipped it alike.
  * <p>
  * Environment : every top level key of the reports (except pages) is compared, a difference is an {@code ENV DIFF}
  * mismatch (another Java2D pipeline, DPI awareness, look and feel, desktop features...), except for the keys of
@@ -59,14 +61,26 @@ public class Compare {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 3) {
-            System.err.println("usage: java tools/Compare.java <dirA> <dirB> <outDir> [tolerance]");
+        List<String> positional = new ArrayList<>();
+        boolean requireFocus = false;
+        for (String arg : args) {
+            if (arg.equals("--require-focus")) {
+                requireFocus = true;
+            } else if (arg.startsWith("--")) {
+                System.err.println("Unknown option " + arg);
+                System.exit(2);
+            } else {
+                positional.add(arg);
+            }
+        }
+        if (positional.size() < 3) {
+            System.err.println("usage: java tools/Compare.java <dirA> <dirB> <outDir> [tolerance] [--require-focus]");
             System.exit(2);
         }
-        Path a = Path.of(args[0]);
-        Path b = Path.of(args[1]);
-        Path out = Path.of(args[2]);
-        int tolerance = args.length > 3 ? Integer.parseInt(args[3]) : 0;
+        Path a = Path.of(positional.get(0));
+        Path b = Path.of(positional.get(1));
+        Path out = Path.of(positional.get(2));
+        int tolerance = positional.size() > 3 ? Integer.parseInt(positional.get(3)) : 0;
         Files.createDirectories(out);
 
         // Reports
@@ -176,6 +190,15 @@ public class Compare {
                 if (!String.valueOf(pa.get("extras")).equals(String.valueOf(pb.get("extras")))) {
                     notes.add("extras: A=" + pa.get("extras") + " | B=" + pb.get("extras"));
                 }
+                if (requireFocus) {
+                    for (var run : List.of(Map.entry("A", pa), Map.entry("B", pb))) {
+                        Map<String, Object> page = run.getValue();
+                        if (Boolean.TRUE.equals(page.get("needsFocus"))
+                                && !(page.get("focusAttempts") instanceof Number n && n.intValue() > 0)) {
+                            notes.add("focus: the page never got the focus in " + run.getKey() + " (--require-focus)");
+                        }
+                    }
+                }
             }
             List<?> errorsA = pa != null && pa.get("errors") instanceof List<?> l ? l : List.of();
             List<?> errorsB = pb != null && pb.get("errors") instanceof List<?> l ? l : List.of();
@@ -209,6 +232,12 @@ public class Compare {
                 lines.add("uncaught outside pages in " + entry.getKey() + ": " + map);
                 errorPages++;
             }
+        }
+
+        if (pageIds.isEmpty() || images.isEmpty()) {
+            // e.g. both runs failed before the first page : nothing was compared
+            lines.add("no page or image to compare in " + a + " and " + b);
+            mismatches++;
         }
 
         long identical = images.stream().filter(r -> r.status.equals("IDENTICAL")).count();
@@ -293,7 +322,6 @@ public class Compare {
         return new ImageResult(name, noise ? "NOISE" : "DIFFERENT", differing, (long) w * h, maxDelta, diffFile);
     }
 
-    @SuppressWarnings("unchecked")
     /**
      * The strings of a JSON array value of a report, empty when absent.
      */
@@ -301,6 +329,7 @@ public class Compare {
         return value instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of();
     }
 
+    @SuppressWarnings("unchecked")
     static Map<String, Object> readReport(Path dir) throws IOException {
         Path file = dir.resolve("report.json");
         if (!Files.exists(file)) {
