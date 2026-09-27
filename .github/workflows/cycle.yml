@@ -1,0 +1,352 @@
+name: Showcase cycle
+
+# The JVM vs native cycle of the showcase (tools/Cycle.java) against a quarkus-desktop commit : called by the showcase CI
+# (showcase.yml) and by the CI of quarkus-desktop. Linux runs in the image of docker/linux (Xvfb, openbox, a system tray) ;
+# the Windows and macOS jobs are experiments (they do not fail the run).
+on:
+  workflow_call:
+    inputs:
+      desktop-repository:
+        description: The quarkus-desktop repository
+        type: string
+        default: Eng-Fouad/quarkus-desktop
+      desktop-ref:
+        description: The quarkus-desktop branch, tag or commit
+        type: string
+        default: main
+      showcase-repository:
+        description: The showcase repository
+        type: string
+        default: Eng-Fouad/quarkus-desktop-showcase
+      showcase-ref:
+        description: The showcase branch, tag or commit
+        type: string
+        default: main
+      runners:
+        description: The Linux runners, a JSON array (ubuntu-24.04-arm, ubuntu-24.04)
+        type: string
+        default: '["ubuntu-24.04-arm"]'
+      windows:
+        description: Also run the experimental Windows cycle
+        type: boolean
+        default: false
+      macos:
+        description: Also run the experimental macOS JVM runs (macOS native needs Quarkus pull request 56979)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# bash runs the steps with -eo pipefail : a cycle piped to tee still fails its step
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    name: ${{ matrix.label }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.runners) }}
+        variant: [ default, awt-only, exact, exact-awt-only ]
+        include:
+          - { variant: default, label: linux, args: --trace }
+          - { variant: awt-only, label: linux-awt, args: --awt-only --trace }
+          - { variant: exact, label: linux-exact, args: --exact }
+          - { variant: exact-awt-only, label: linux-exact-awt, args: --awt-only --exact }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      IMAGE: quarkus-desktop-showcase-linux
+      LABEL: ${{ matrix.label }}
+      ARGS: ${{ matrix.args }}
+      RUNNER: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-repository }}
+          ref: ${{ inputs.showcase-ref }}
+          path: showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.desktop-repository }}
+          ref: ${{ inputs.desktop-ref }}
+          path: quarkus-desktop
+
+      # Mounted as /root/.m2 in the container : the dependencies and the Maven wrapper distribution (saved at the end,
+      # by push and scheduled runs only)
+      - name: Restore the Maven repository
+        id: m2
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: showcase-m2-${{ runner.arch }}-${{ hashFiles('showcase/pom.xml', 'quarkus-desktop/**/pom.xml') }}
+          restore-keys: showcase-m2-${{ runner.arch }}-
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the Linux image
+        uses: docker/build-push-action@v7
+        with:
+          context: showcase/docker/linux
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=showcase-linux-${{ runner.arch }}
+          # written by push and scheduled runs only
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && format('type=gha,mode=min,scope=showcase-linux-{0}', runner.arch) || '' }}
+
+      # docker run, not a job container : the entry point of the image starts the X server, the window manager and the
+      # system tray. quarkus-desktop's own CI runs its tests : only installed here.
+      - name: Install quarkus-desktop
+        run: |
+          docker run --rm --init -v "$PWD/quarkus-desktop":/quarkus-desktop -w /quarkus-desktop \
+            -v "$HOME/.m2":/root/.m2 "$IMAGE" ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee install.log
+
+      # Cycle.java exits 1 when a run fails, when --exact finds accesses missing from the metadata or when the runs do
+      # not match ; --require-focus : a page that never got the focus fails (its Robot input was skipped)
+      - name: Cycle ${{ matrix.label }} ${{ matrix.args }}
+        run: |
+          docker run --rm --init -v "$PWD/showcase":/showcase -v "$HOME/.m2":/root/.m2 "$IMAGE" \
+            java tools/Cycle.java "$LABEL" $ARGS --require-focus 2>&1 | tee cycle.log
+
+      # The verdict and what differs, in the summary of the run and as annotations (readable through the public API
+      # without logging in, unlike the logs)
+      - name: Report
+        if: always()
+        run: |
+          c=showcase/comparison
+          summary=$c/diff-$LABEL/summary.txt
+          verdict=$(grep -m1 -E '^(MATCH|MISMATCH) :' "$c/logs-$LABEL/compare.txt" 2>/dev/null) || verdict="no comparison"
+          # what failed : the end of the cycle, a build failure (with the error lines that follow it), or the install
+          failed="" details=""
+          if [[ -f cycle.log ]]; then
+            failed=$(grep -m1 -E "cycle $LABEL FAILED|(JVM|native) build FAILED|native build : |Invalid label|Unknown option" \
+              cycle.log | sed 's/^\[[0-9:]*\] //') || true
+          elif [[ -f install.log ]]; then
+            failed="installing quarkus-desktop failed"
+            details=$(grep -E '^\[ERROR\]' install.log | head -15) || true
+          fi
+          if [[ -f $summary ]]; then
+            details=$( { grep -E '^(DIFFERENT|SIZE|ONLY_A|ONLY_B|ENV DIFF)' "$summary" || true
+                         sed -n '/^== Checks and errors/,$p' "$summary" | tail -n +2 | grep -v 'expected: ' || true; } \
+                       | head -30) || true
+          elif [[ $failed == *"build FAILED"* ]]; then
+            details=$(sed -n -E '/(JVM|native) build FAILED/,$p' cycle.log | tail -n +2 | head -12) || true
+          fi
+          # the annotation first : readable through the public API without logging in, unlike the logs
+          if [[ -n $failed || $verdict != MATCH* ]]; then
+            message="${failed:-$verdict}"$'\n'"$details"
+            message=${message//'%'/'%25'}
+            message=${message//$'\r'/'%0D'}
+            message=${message//$'\n'/'%0A'}
+            echo "::error title=Showcase $LABEL on $RUNNER::$message"
+          fi
+          {
+            echo "### $LABEL on $RUNNER"
+            echo
+            echo "\`$verdict\`"
+            if [[ -n $failed ]]; then echo; echo "$failed"; fi
+            if [[ -n $details ]]; then echo; echo '```'; echo "$details"; echo '```'; fi
+            if [[ -f $c/trace-$LABEL/metadata-diff.md ]]; then
+              echo; echo "MetadataDiff (informational, see the artifact):"
+              grep '^## ' "$c/trace-$LABEL/metadata-diff.md" | sed 's/^## /- /' || echo "- (no MetadataDiff output)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The container runs as root : give the files back to the runner user before the uploads and the cache
+      - name: Restore the file ownership
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" showcase quarkus-desktop "$HOME/.m2" || true
+          # the snapshots of quarkus-desktop are built from the checked out commit : never from the cache
+          rm -rf "$HOME/.m2/repository/io/quarkiverse/desktop"
+
+      - name: Save the Maven repository
+        if: success() && steps.m2.outputs.cache-hit != 'true' && (github.event_name == 'push' || github.event_name == 'schedule')
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: ${{ steps.m2.outputs.cache-primary-key }}
+
+      - name: Upload the verdict, logs and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-${{ matrix.label }}-${{ matrix.os }}
+          path: |
+            cycle.log
+            install.log
+            showcase/comparison/diff-${{ matrix.label }}
+            showcase/comparison/logs-${{ matrix.label }}
+            showcase/comparison/*-${{ matrix.label }}/report.json
+            showcase/comparison/*-${{ matrix.label }}/run.log
+            showcase/comparison/trace-${{ matrix.label }}/metadata-diff.md
+            showcase/comparison/trace-${{ matrix.label }}/metadata/reachability-metadata.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The images of both runs (index.html of the diff directory shows them side by side)
+      - name: Upload the images
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-${{ matrix.label }}-${{ matrix.os }}-images
+          path: |
+            showcase/comparison/jvm-${{ matrix.label }}
+            showcase/comparison/native-${{ matrix.label }}
+            showcase/comparison/diff-${{ matrix.label }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  windows:
+    # An experiment : the hosted screen is 1024x768 by default (the showcase places its secondary windows for a large
+    # screen), Direct3D is off on Windows Server (GDI), and the focus of an unattended desktop is unproven
+    if: inputs.windows
+    name: win on windows-2025 (experimental)
+    runs-on: windows-2025
+    continue-on-error: true
+    timeout-minutes: 120
+    env:
+      LABEL: win
+    steps:
+      - name: Prepare git
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-repository }}
+          ref: ${{ inputs.showcase-ref }}
+          path: showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.desktop-repository }}
+          ref: ${{ inputs.desktop-ref }}
+          path: quarkus-desktop
+
+      - name: Set up GraalVM for JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ github.token }}
+          cache: 'maven'
+
+      - name: Screen and session (diagnostics)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-CimInstance Win32_VideoController | Select-Object Name, CurrentHorizontalResolution, CurrentVerticalResolution
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Warning $_ }
+          Get-CimInstance Win32_VideoController | Select-Object Name, CurrentHorizontalResolution, CurrentVerticalResolution
+          query user
+          exit 0
+
+      - name: Install quarkus-desktop
+        working-directory: quarkus-desktop
+        run: ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee ../install.log
+
+      - name: Cycle win
+        working-directory: showcase
+        run: java tools/Cycle.java "$LABEL" --require-focus 2>&1 | tee ../cycle.log
+
+      - name: Report
+        if: always()
+        run: |
+          verdict=$(grep -m1 -E '^(MATCH|MISMATCH) :' "showcase/comparison/logs-$LABEL/compare.txt" 2>/dev/null || echo "no comparison")
+          { echo "### $LABEL on windows-2025 (experimental)"; echo; echo "\`$verdict\`"; } >> "$GITHUB_STEP_SUMMARY"
+          grep -m1 -F "cycle $LABEL FAILED" cycle.log 2>/dev/null | sed 's/^\[[0-9:]*\] //' >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-win-x64
+          path: |
+            cycle.log
+            install.log
+            showcase/comparison/jvm-win
+            showcase/comparison/native-win
+            showcase/comparison/diff-win
+            showcase/comparison/logs-win
+          if-no-files-found: ignore
+          retention-days: 7
+
+  macos:
+    # An experiment : JVM runs only (macOS native executables need the quarkus-awt of the Quarkus pull request
+    # https://github.com/quarkusio/quarkus/pull/56979, not released yet). Two JVM runs compared : determinism, the
+    # permissions of the runner (macos.tcc.* keys) and the focus of an unattended session
+    if: inputs.macos
+    name: mac JVM on macos-15 (experimental)
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-repository }}
+          ref: ${{ inputs.showcase-ref }}
+          path: showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.desktop-repository }}
+          ref: ${{ inputs.desktop-ref }}
+          path: quarkus-desktop
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      - name: Environment (diagnostics)
+        continue-on-error: true
+        run: |
+          sw_vers
+          csrutil status || true
+          system_profiler SPDisplaysDataType || true
+
+      - name: Install quarkus-desktop
+        working-directory: quarkus-desktop
+        run: ./mvnw -B -ntp install -DskipTests -Dno-format 2>&1 | tee ../install.log
+
+      - name: Two JVM runs
+        working-directory: showcase
+        run: |
+          ./mvnw -B -ntp package -DskipTests 2>&1 | tee ../build.log
+          java tools/Snapshot.java jvm jvm-mac -- -Dshowcase.robot=true
+          java tools/Snapshot.java jvm jvm-mac-2 -- -Dshowcase.robot=true
+          java tools/Compare.java comparison/jvm-mac comparison/jvm-mac-2 comparison/diff-mac --require-focus \
+            | tee ../compare.txt
+
+      - name: Report
+        if: always()
+        run: |
+          verdict=$(grep -m1 -E '^(MATCH|MISMATCH) :' compare.txt 2>/dev/null || echo "no comparison")
+          { echo "### mac JVM vs JVM on macos-15 (experimental)"; echo; echo "\`$verdict\`"; } >> "$GITHUB_STEP_SUMMARY"
+          screencapture -x screen.png || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-mac-jvm
+          path: |
+            install.log
+            build.log
+            compare.txt
+            screen.png
+            showcase/comparison/jvm-mac
+            showcase/comparison/jvm-mac-2
+            showcase/comparison/diff-mac
+          if-no-files-found: ignore
+          retention-days: 7
