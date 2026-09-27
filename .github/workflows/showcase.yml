@@ -7,8 +7,6 @@ on:
   push:
     branches:
       - "main"
-      # TEMPORARY : the test branch of the five platforms (removed before the merge)
-      - "ci-platforms"
     paths-ignore:
       - '.gitignore'
       - 'LICENSE'
