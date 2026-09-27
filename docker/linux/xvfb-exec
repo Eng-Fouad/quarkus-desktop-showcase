@@ -26,4 +26,17 @@ if [ "${SHOWCASE_WM:-openbox}" = openbox ]; then
         sleep 1
     fi
 fi
+# A system tray (SHOWCASE_TRAY, stalonetray by default, "none" to leave it out) : AWT supports SystemTray when a tray
+# manager owns the _NET_SYSTEM_TRAY selection. It sits in the upper right corner, away from the windows of the pages, and
+# its first icon is at a known point : SHOWCASE_TRAY_ICON tells the desktop-services page where to click it with Robot.
+if [ "${SHOWCASE_TRAY:-stalonetray}" = stalonetray ]; then
+    screen_width=${XVFB_SCREEN:-3840x2160x24}
+    screen_width=${screen_width%%x*}
+    stalonetray --geometry 1x1-0+0 --icon-size 24 --kludges force_icons_size > /tmp/stalonetray.log 2>&1 &
+    for i in $(seq 1 20); do
+        xprop -root -notype 2>/dev/null | grep -q . && xwininfo -name stalonetray > /dev/null 2>&1 && break
+        sleep 0.5
+    done
+    export SHOWCASE_TRAY_ICON="$((screen_width - 12)),12"
+fi
 exec "$@"

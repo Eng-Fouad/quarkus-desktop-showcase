@@ -13,6 +13,7 @@ import java.awt.Image;
 import java.awt.MenuItem;
 import java.awt.Point;
 import java.awt.PopupMenu;
+import java.awt.Robot;
 import java.awt.RenderingHints;
 import java.awt.SplashScreen;
 import java.awt.SystemTray;
@@ -20,6 +21,10 @@ import java.awt.Taskbar;
 import java.awt.Toolkit;
 import java.awt.TrayIcon;
 import java.awt.Window;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.desktop.AppForegroundEvent;
 import java.awt.desktop.AppForegroundListener;
 import java.awt.desktop.QuitStrategy;
@@ -33,12 +38,16 @@ import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.inject.Singleton;
+
+import org.jboss.logging.Logger;
 
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
@@ -46,6 +55,8 @@ import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Platforms;
+import io.quarkiverse.desktop.showcase.core.RobotSession;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
@@ -62,6 +73,15 @@ import io.quarkiverse.desktop.showcase.core.Ui;
  */
 @Singleton
 public class DesktopServicesPage implements FeaturePage {
+
+    private static final Logger LOG = Logger.getLogger(DesktopServicesPage.class);
+
+    /**
+     * The screen point of the tray icon, {@code x,y}, when the environment knows it : the Linux Docker environment of
+     * the showcase runs a tray (stalonetray) at a fixed place and sets it (docker/linux/xvfb-exec). The page then clicks
+     * the icon with Robot. Nothing is clicked elsewhere : a tray icon has no API for its location.
+     */
+    static final String TRAY_ICON_ENV = "SHOWCASE_TRAY_ICON";
 
     private static final int HALF = 494;
     private static final String[] PREDEFINED_CURSORS = { "Default Cursor", "Crosshair Cursor", "Text Cursor",
@@ -145,6 +165,10 @@ public class DesktopServicesPage implements FeaturePage {
                 .thenCompose(v -> Edt.background(() -> taskbarChecks(window)))
                 .thenAccept(taskbar::setChecks)
                 .thenCompose(v -> Edt.supply(this::trayChecks))
+                .thenCompose(run -> run.icon() != null && trayIconPoint() != null
+                        ? Edt.background(() -> trayInput(run))
+                        : CompletableFuture.completedFuture(run))
+                .thenCompose(run -> Edt.supply(() -> trayRemove(run)))
                 .thenAccept(tray::setChecks);
     }
 
@@ -441,7 +465,15 @@ public class DesktopServicesPage implements FeaturePage {
 
     // ------------------------------------------------------------------------------------------------ SystemTray
 
-    private List<Check> trayChecks() {
+    /**
+     * A tray icon added by {@link #trayChecks}, clicked by {@link #trayInput} (when the environment knows where it is),
+     * removed by {@link #trayRemove}.
+     */
+    private record TrayRun(List<Check> checks, SystemTray tray, TrayIcon icon, AtomicInteger changes,
+            PropertyChangeListener listener, List<String> events) {
+    }
+
+    private TrayRun trayChecks() {
         List<Check> checks = new ArrayList<>();
         boolean supported = SystemTray.isSupported();
         checks.add(Check.info("SystemTray.isSupported()", supported));
@@ -450,7 +482,7 @@ public class DesktopServicesPage implements FeaturePage {
         if (!supported) {
             checks.add(DesktopSupport.expectThrows("SystemTray.getSystemTray()", UnsupportedOperationException.class,
                     SystemTray::getSystemTray));
-            return checks;
+            return new TrayRun(checks, null, null, null, null, null);
         }
         SystemTray tray = SystemTray.getSystemTray();
         checks.add(Checks.info("getTrayIconSize()", () -> tray.getTrayIconSize().width + "x"
@@ -458,6 +490,7 @@ public class DesktopServicesPage implements FeaturePage {
         AtomicInteger changes = new AtomicInteger();
         PropertyChangeListener listener = e -> changes.incrementAndGet();
         tray.addPropertyChangeListener("trayIcons", listener);
+        List<String> events = Collections.synchronizedList(new ArrayList<>());
         try {
             PopupMenu popup = new PopupMenu("Showcase");
             popup.add(new MenuItem("Show the showcase"));
@@ -466,7 +499,23 @@ public class DesktopServicesPage implements FeaturePage {
             TrayIcon icon = new TrayIcon(trayImage(), "Quarkus Desktop Showcase", popup);
             icon.setImageAutoSize(true);
             icon.setActionCommand("showcase-tray");
-            icon.addActionListener(e -> {
+            // the events of the icon : checked after the Robot clicks, logged in interactive mode (click the icon)
+            icon.addActionListener(e -> trayEvent(events, "action " + e.getActionCommand()));
+            icon.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    trayEvent(events, "pressed b" + e.getButton() + (e.isPopupTrigger() ? " popup trigger" : ""));
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    trayEvent(events, "released b" + e.getButton() + (e.isPopupTrigger() ? " popup trigger" : ""));
+                }
+
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    trayEvent(events, "clicked b" + e.getButton() + " x" + e.getClickCount());
+                }
             });
             checks.add(Checks.expect("TrayIcon properties", "Quarkus Desktop Showcase true showcase-tray 3",
                     () -> icon.getToolTip() + " " + icon.isImageAutoSize() + " " + icon.getActionCommand() + " "
@@ -486,6 +535,110 @@ public class DesktopServicesPage implements FeaturePage {
                 icon.setImage(trayImage());
                 return "updated";
             }));
+            return new TrayRun(checks, tray, icon, changes, listener, events);
+        } catch (RuntimeException e) {
+            tray.removePropertyChangeListener("trayIcons", listener);
+            checks.add(Check.fail("SystemTray", Checks.describe(e)));
+            return new TrayRun(checks, null, null, null, null, null);
+        }
+    }
+
+    private static void trayEvent(List<String> events, String event) {
+        events.add(event);
+        if (!ShowcaseMode.snapshot()) {
+            LOG.infof("TrayIcon event : %s", event);
+        }
+    }
+
+    /**
+     * Clicks the tray icon with Robot (off the EDT) where the environment says it is ({@link #TRAY_ICON_ENV}) : a click,
+     * a double click and a click of the popup button (the popup menu shows, Escape closes it), each checked against the
+     * events of the icon. The mouse pointer is moved back.
+     */
+    private TrayRun trayInput(TrayRun run) throws Exception {
+        Point point = trayIconPoint();
+        Robot robot = new Robot();
+        Point pointer = java.awt.MouseInfo.getPointerInfo().getLocation();
+        int interval = multiClickInterval();
+        try {
+            robot.mouseMove(point.x, point.y);
+            RobotSession.waitForIdle(robot);
+            run.checks().add(Checks.expect("TrayIcon click (Robot, the tray of the environment)",
+                    "pressed b1, released b1, action showcase-tray, clicked b1 x1",
+                    () -> trayEvents(run, robot, () -> click(robot, InputEvent.BUTTON1_DOWN_MASK))));
+            DesktopSupport.sleep(interval + 200);
+            run.checks().add(Checks.expect("TrayIcon double click (Robot)",
+                    "pressed b1, released b1, action showcase-tray, clicked b1 x1, pressed b1, released b1, clicked b1 x2",
+                    () -> trayEvents(run, robot, () -> {
+                        click(robot, InputEvent.BUTTON1_DOWN_MASK);
+                        robot.delay(60);
+                        click(robot, InputEvent.BUTTON1_DOWN_MASK);
+                    })));
+            DesktopSupport.sleep(interval + 200);
+            // X11 : the popup trigger is the press of button 3, the popup menu of the icon shows
+            run.checks().add(Checks.expect("TrayIcon popup button (Robot)",
+                    "pressed b3 popup trigger, released b3, clicked b3 x1",
+                    () -> trayEvents(run, robot, () -> click(robot, InputEvent.BUTTON3_DOWN_MASK))));
+            // the popup menu has the keyboard (a grab of this process) : Escape closes it
+            robot.keyPress(KeyEvent.VK_ESCAPE);
+            robot.keyRelease(KeyEvent.VK_ESCAPE);
+            RobotSession.waitForIdle(robot);
+            DesktopSupport.sleep(interval + 200);
+        } finally {
+            robot.mouseMove(pointer.x, pointer.y);
+        }
+        return run;
+    }
+
+    /**
+     * The events of the icon that {@code input} produces, comma separated.
+     */
+    private static String trayEvents(TrayRun run, Robot robot, Runnable input) {
+        run.events().clear();
+        input.run();
+        RobotSession.waitForIdle(robot);
+        robot.delay(300);
+        RobotSession.waitForIdle(robot);
+        synchronized (run.events()) {
+            return String.join(", ", run.events());
+        }
+    }
+
+    private static void click(Robot robot, int button) {
+        robot.mousePress(button);
+        robot.mouseRelease(button);
+    }
+
+    private static int multiClickInterval() {
+        Object interval = Toolkit.getDefaultToolkit().getDesktopProperty("awt.multiClickInterval");
+        return interval instanceof Integer i ? Math.min(i, 2000) : 500;
+    }
+
+    /**
+     * The point of {@link #TRAY_ICON_ENV}, on Linux only, or {@code null}.
+     */
+    private static Point trayIconPoint() {
+        String value = System.getenv(TRAY_ICON_ENV);
+        if (value == null || !Platforms.isLinux()) {
+            return null;
+        }
+        String[] xy = value.split(",");
+        try {
+            return new Point(Integer.parseInt(xy[0].trim()), Integer.parseInt(xy[1].trim()));
+        } catch (RuntimeException e) {
+            LOG.warnf("Ignored %s=%s : x,y expected", TRAY_ICON_ENV, value);
+            return null;
+        }
+    }
+
+    private List<Check> trayRemove(TrayRun run) {
+        List<Check> checks = run.checks();
+        if (run.icon() == null) {
+            return checks;
+        }
+        TrayIcon icon = run.icon();
+        SystemTray tray = run.tray();
+        try {
             if (DesktopSupport.sideEffect(DesktopSupport.TRAY_BALLOON)) {
                 checks.add(Checks.run("TrayIcon.displayMessage", () -> {
                     icon.displayMessage("Quarkus Desktop Showcase", "A balloon message", TrayIcon.MessageType.INFO);
@@ -498,16 +651,18 @@ public class DesktopServicesPage implements FeaturePage {
                 tray.remove(icon);
                 return tray.getTrayIcons().length;
             }));
-            checks.add(Checks.expect("trayIcons property changes", 2, changes::get));
+            checks.add(Checks.expect("trayIcons property changes", 2, run.changes()::get));
             if (!ShowcaseMode.snapshot()) {
-                // interactive mode : the icon stays in the tray while the page is displayed
-                tray.add(icon);
-                trayIcon = icon;
+                // interactive mode : the icon stays in the tray while the page is displayed (its events are logged)
+                try {
+                    tray.add(icon);
+                    trayIcon = icon;
+                } catch (AWTException e) {
+                    checks.add(Check.fail("SystemTray.add(TrayIcon) again", Checks.describe(e)));
+                }
             }
-        } catch (AWTException e) {
-            checks.add(Check.fail("SystemTray", Checks.describe(e)));
         } finally {
-            tray.removePropertyChangeListener("trayIcons", listener);
+            tray.removePropertyChangeListener("trayIcons", run.listener());
         }
         return checks;
     }

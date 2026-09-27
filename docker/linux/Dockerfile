@@ -12,7 +12,7 @@ FROM quay.io/quarkus/ubi9-quarkus-graalvmce-builder-image:jdk-25 AS graalvm
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        xvfb xauth xclip x11-utils openbox xcompmgr \
+        xvfb xauth xclip x11-utils openbox xcompmgr stalonetray \
         libx11-6 libxext6 libxrender1 libxi6 libxtst6 libxrandr2 libxinerama1 libxcursor1 libxxf86vm1 \
         libfontconfig1 libfreetype6 libcups2t64 libasound2t64 libgtk-3-0t64 libgl1 libgl1-mesa-dri libegl1 \
         fonts-dejavu-core fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
