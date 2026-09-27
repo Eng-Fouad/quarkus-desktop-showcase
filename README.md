@@ -263,7 +263,9 @@ public class ShapesPage implements FeaturePage {
     `-Dshowcase.robot=true`: two always-on-top windows read with a tolerance for 1.5 s, a pointer move tried three
     times). When a denial is known, `RobotSession` presses no key or button (skipped, as without the focus) and its
     pixel waits (`waitForPixel`, `raiseUntil`, `awaitVisible`) end at the first mismatch without raising windows;
-    without the probe the input is silently dropped (the retries run to their limit, the checks tell);
+    without the probe the input is silently dropped (the retries run to their limit, the checks tell). The menu bar of
+    an AWT `Frame` is the screen menu bar on macOS: `awt-menus` does not drive it with the keyboard there (F10 does not
+    open it), only its popup menu;
   - a Robot sequence whose effect is missing is done again (bounded, the window focused again first), and the number
     of attempts is recorded with `Check.attempts(action, n)`: an informational check in `report.json` only (not painted
     by `ChecksView`), whose differences `Compare` reports as `attempts:` notes, not as mismatches. What was missing is

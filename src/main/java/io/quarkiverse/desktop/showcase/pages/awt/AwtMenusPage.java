@@ -539,7 +539,9 @@ public class AwtMenusPage implements FeaturePage {
 
     /**
      * Runs on a background thread (Robot). Each keyboard sequence is retried (at most {@link #ATTEMPTS} times, the menu
-     * frame focused again first) when its effect is missing : a sequence changes no state unless it had its effect.
+     * frame focused again first) when its effect is missing : a sequence changes no state unless it had its effect. Only
+     * the inputs skipped in the last attempt of a sequence without effect are reported ("skipped inputs") : a successful
+     * retry leaves no trace in the checks (the log has it, {@link RobotSession#logRetry}).
      */
     private static DriveResult drive(MenuFrame m, Rectangle frame, Point canvas, Dimension size) throws Exception {
         List<Check> checks = new ArrayList<>();
@@ -547,14 +549,8 @@ public class AwtMenusPage implements FeaturePage {
         // AWT on Windows lays the native menus out right to left when the keyboard layout is Arabic or Hebrew : the arrow
         // keys then move the other way in the menu bar
         boolean rtl = AwtSupport.rightToLeftInput();
-        int next = rtl ? KeyEvent.VK_LEFT : KeyEvent.VK_RIGHT;
         checks.add(Check.info("keyboard layout (menu bar direction on Windows)", AwtSupport.inputLocale()
                 + (rtl ? ", right to left" : ", left to right")));
-        // Windows : F10 selects the first menu of the bar, Down opens it on its first item. X11 (XMenuBarPeer) : F10
-        // opens the first menu on its first item, and the arrow keys open the next menu on its first item
-        boolean opensOnFirstItem = Platforms.isLinux();
-        String open = opensOnFirstItem ? "F10" : "F10, Down";
-        String view = opensOnFirstItem ? "F10, Right, Right, Enter" : "F10, Right, Right, Down, Enter";
         // the native menu loops consume the keys (Windows menu loop, X11 menu grabs) : Java sees no key event while a
         // menu is open
         try (RobotSession robot = RobotSession.open().nativeKeys(true)) {
@@ -568,96 +564,135 @@ public class AwtMenusPage implements FeaturePage {
             robot.raiseUntil("awt-menus menu frame above the backdrop", m.frame, center, rgb -> rgb != BACKDROP, 5, 200);
             BufferedImage closed = robot.capture(frame);
             images.put("frame", closed);
-
-            // F10 (, Down) : the File menu opens (the capture differs from the closed frame)
-            BufferedImage file = null;
-            int attempt = 0;
-            while (file == null && attempt < ATTEMPTS && focused(robot, m)) {
-                attempt++;
-                if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))) {
-                    robot.delay(600);
-                    BufferedImage captured = robot.capture(frame);
-                    if (!Checks.sha256(captured).equals(Checks.sha256(closed))) {
-                        file = captured;
-                    }
-                }
-                if (file == null) {
-                    RobotSession.logRetry("awt-menus " + open, attempt, "the File menu did not open, skipped "
-                            + robot.skipped());
-                    closeMenus(robot);
-                }
-            }
-            checks.add(Check.attempts(open, attempt));
-            if (file != null) {
-                BufferedImage opened = file;
-                images.put("file-menu", opened);
-                checks.add(Checks.expect(open + " : the File menu opens (capture differs)", true,
-                        () -> !Checks.sha256(opened).equals(Checks.sha256(closed))));
-                if (robot.key(next) && robot.key(next)) {
-                    robot.delay(600);
-                    images.put("view-menu", robot.capture(frame));
-                }
+            List<String> skipped = new ArrayList<>();
+            if (Platforms.isMac()) {
+                // the MenuBar of a Frame is the screen menu bar of macOS : F10 does not open it (the system shortcut
+                // that moves the keyboard focus to the menu bar is Ctrl+F2, a keyboard setting), and it is outside the
+                // captures of the frame
+                checks.add(Check.info("native menus with the keyboard", "skipped: screen menu bar (macOS)"));
             } else {
-                checks.add(Check.info(open + " : the File menu opens", "skipped: not focused"));
+                keyboardMenus(m, robot, frame, closed, rtl ? KeyEvent.VK_LEFT : KeyEvent.VK_RIGHT, checks, images,
+                        skipped);
             }
-            closeMenus(robot);
-
-            // activation from the native menu : the peer calls back into Java (handleAction)
-            m.events.clear();
-            attempt = 0;
-            boolean activated = false;
-            while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
-                attempt++;
-                if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))
-                        && robot.key(KeyEvent.VK_ENTER)) {
-                    activated = waitFor(robot, () -> !m.events.isEmpty());
-                }
-                if (!activated) {
-                    RobotSession.logRetry("awt-menus " + open + ", Enter", attempt, "no action, skipped "
-                            + robot.skipped());
-                    closeMenus(robot);
-                }
-            }
-            checks.add(Check.attempts(open + ", Enter", attempt));
-            if (activated) {
-                checks.add(Checks.expect(open + ", Enter : native activation of File > New", "action New",
-                        () -> String.join(", ", m.events)));
-            } else {
-                checks.add(Check.info(open + ", Enter : native activation of File > New", "skipped: not focused"));
-            }
-            m.events.clear();
-            attempt = 0;
-            activated = false;
-            while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
-                attempt++;
-                if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next)
-                        && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN)) && robot.key(KeyEvent.VK_ENTER)) {
-                    // the item toggles once : never sent again once its event arrived
-                    activated = waitFor(robot, () -> !m.events.isEmpty());
-                }
-                if (!activated) {
-                    RobotSession.logRetry("awt-menus " + view, attempt, "no item event, skipped "
-                            + robot.skipped());
-                    closeMenus(robot);
-                }
-            }
-            checks.add(Check.attempts(view, attempt));
-            if (activated) {
-                checks.add(Checks.expect("native activation of View > Toolbar (CheckboxMenuItem)",
-                        "item Toolbar DESELECTED, state false", () -> String.join(", ", m.events) + ", state "
-                                + m.toolbar.getState()));
-            } else {
-                checks.add(Check.info("native activation of View > Toolbar (CheckboxMenuItem)", "skipped: not focused"));
-            }
-            robot.key(KeyEvent.VK_ESCAPE);
-            robot.delay(200);
-
-            popup(m, robot, canvas, size, checks, images);
-            if (!robot.skipped().isEmpty()) {
-                checks.add(Check.info("skipped inputs", "skipped: not focused (" + robot.skipped().size() + ")"));
+            popup(m, robot, canvas, size, checks, images, skipped);
+            if (!skipped.isEmpty()) {
+                checks.add(Check.info("skipped inputs", "skipped: not focused (" + skipped.size() + ")"));
             }
         }
         return new DriveResult(checks, images);
+    }
+
+    /**
+     * The native menu bar driven with the keyboard (Windows and X11) : F10 opens the File menu, F10 and Enter activates
+     * File > New, and F10, the next menu twice and Enter toggles View > Toolbar. Each sequence at most
+     * {@link #ATTEMPTS} times ; the inputs skipped in the last attempt of a sequence without effect are added to
+     * {@code skipped}.
+     */
+    private static void keyboardMenus(MenuFrame m, RobotSession robot, Rectangle frame, BufferedImage closed, int next,
+            List<Check> checks, Map<String, BufferedImage> images, List<String> skipped) throws Exception {
+        // Windows : F10 selects the first menu of the bar, Down opens it on its first item. X11 (XMenuBarPeer) : F10
+        // opens the first menu on its first item, and the arrow keys open the next menu on its first item
+        boolean opensOnFirstItem = Platforms.isLinux();
+        String open = opensOnFirstItem ? "F10" : "F10, Down";
+        String view = opensOnFirstItem ? "F10, Right, Right, Enter" : "F10, Right, Right, Down, Enter";
+
+        // F10 (, Down) : the File menu opens (the capture differs from the closed frame)
+        BufferedImage file = null;
+        int attempt = 0;
+        while (file == null && attempt < ATTEMPTS && focused(robot, m)) {
+            attempt++;
+            robot.skipped().clear();
+            if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))) {
+                robot.delay(600);
+                BufferedImage captured = robot.capture(frame);
+                if (!Checks.sha256(captured).equals(Checks.sha256(closed))) {
+                    file = captured;
+                }
+            }
+            if (file == null) {
+                RobotSession.logRetry("awt-menus " + open, attempt, "the File menu did not open, skipped "
+                        + robot.skipped());
+                closeMenus(robot);
+            }
+        }
+        checks.add(Check.attempts(open, attempt));
+        if (file != null) {
+            BufferedImage opened = file;
+            images.put("file-menu", opened);
+            checks.add(Checks.expect(open + " : the File menu opens (capture differs)", true,
+                    () -> !Checks.sha256(opened).equals(Checks.sha256(closed))));
+            if (robot.key(next) && robot.key(next)) {
+                robot.delay(600);
+                images.put("view-menu", robot.capture(frame));
+            }
+        } else {
+            checks.add(Check.info(open + " : the File menu opens", noEffect(robot, attempt)));
+            skipped.addAll(robot.skipped());
+        }
+        closeMenus(robot);
+
+        // activation from the native menu : the peer calls back into Java (handleAction)
+        m.events.clear();
+        attempt = 0;
+        boolean activated = false;
+        while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
+            attempt++;
+            robot.skipped().clear();
+            if (robot.key(KeyEvent.VK_F10) && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN))
+                    && robot.key(KeyEvent.VK_ENTER)) {
+                activated = waitFor(robot, () -> !m.events.isEmpty());
+            }
+            if (!activated) {
+                RobotSession.logRetry("awt-menus " + open + ", Enter", attempt, "no action, skipped "
+                        + robot.skipped());
+                closeMenus(robot);
+            }
+        }
+        checks.add(Check.attempts(open + ", Enter", attempt));
+        if (activated) {
+            checks.add(Checks.expect(open + ", Enter : native activation of File > New", "action New",
+                    () -> String.join(", ", m.events)));
+        } else {
+            checks.add(Check.info(open + ", Enter : native activation of File > New", noEffect(robot, attempt)));
+            skipped.addAll(robot.skipped());
+        }
+        m.events.clear();
+        attempt = 0;
+        activated = false;
+        while (!activated && attempt < ATTEMPTS && focused(robot, m)) {
+            attempt++;
+            robot.skipped().clear();
+            if (robot.key(KeyEvent.VK_F10) && robot.key(next) && robot.key(next)
+                    && (opensOnFirstItem || robot.key(KeyEvent.VK_DOWN)) && robot.key(KeyEvent.VK_ENTER)) {
+                // the item toggles once : never sent again once its event arrived
+                activated = waitFor(robot, () -> !m.events.isEmpty());
+            }
+            if (!activated) {
+                RobotSession.logRetry("awt-menus " + view, attempt, "no item event, skipped "
+                        + robot.skipped());
+                closeMenus(robot);
+            }
+        }
+        checks.add(Check.attempts(view, attempt));
+        if (activated) {
+            checks.add(Checks.expect("native activation of View > Toolbar (CheckboxMenuItem)",
+                    "item Toolbar DESELECTED, state false", () -> String.join(", ", m.events) + ", state "
+                            + m.toolbar.getState()));
+        } else {
+            checks.add(Check.info("native activation of View > Toolbar (CheckboxMenuItem)", noEffect(robot, attempt)));
+            skipped.addAll(robot.skipped());
+        }
+        robot.key(KeyEvent.VK_ESCAPE);
+        robot.delay(200);
+    }
+
+    /**
+     * The value of a keyboard sequence whose effect is still missing after {@code attempts} attempts : skipped when the
+     * menu frame could not be focused again (fewer than {@link #ATTEMPTS} attempts) or an input of the last attempt was
+     * skipped, no effect when every key of every attempt was sent.
+     */
+    private static String noEffect(RobotSession robot, int attempts) {
+        return attempts < ATTEMPTS || !robot.skipped().isEmpty() ? "skipped: not focused" : "no effect";
     }
 
     /**
@@ -676,39 +711,78 @@ public class AwtMenusPage implements FeaturePage {
         robot.delay(300);
     }
 
+    /** Where the popup menu is shown in the canvas. */
+    private static final int POPUP_X = 30;
+    private static final int POPUP_Y = 30;
+
     /**
-     * {@code PopupMenu.show} : on Windows the peer tracks the menu synchronously (the calling thread waits until the menu
-     * is closed), so it is shown from a helper thread and closed with Escape : sent once, then again while the helper
-     * thread waits (the menu stays open), at most {@link #ATTEMPTS} times. On X11 {@code show} returns at once.
+     * {@code PopupMenu.show}, then Escape.
+     * <ul>
+     * <li>Windows : the peer tracks the menu synchronously (the calling thread waits until the menu is closed), so it is
+     * shown from a helper thread and closed with Escape, sent while the helper thread waits (the menu stays open), at
+     * most {@link #ATTEMPTS} times : "closed" once the thread returned. A thread that returned before the first Escape
+     * means the menu was not tracked : no Escape (it would go to the frame), the check fails.</li>
+     * <li>X11 ({@code XPopupMenuPeer} maps the menu and grabs the input) and macOS : {@code show} returns at once, the
+     * menu is open all the same. The first Escape is always sent, again while the menu is still on screen : "shown"
+     * and "closed" are read from a screen pixel inside the menu, compared with the same pixel before {@code show} (the
+     * color management of macOS changes the captured colors).</li>
+     * </ul>
+     * Not shown when the input is known to be dropped (macOS permission) : no Escape could close it. The inputs skipped
+     * when the menu was not closed are added to {@code skipped}.
      */
     private static void popup(MenuFrame m, RobotSession robot, Point canvas, Dimension size, List<Check> checks,
-            Map<String, BufferedImage> images) throws Exception {
+            Map<String, BufferedImage> images, List<String> skipped) throws Exception {
         if (!focused(robot, m)) {
             checks.add(Check.info("PopupMenu.show, Escape", "skipped: not focused"));
             return;
         }
-        Thread shower = new Thread(() -> m.popup.show(m.canvas, 30, 30), "showcase-popup-menu");
+        if (RobotSession.inputDenied()) {
+            checks.add(Check.info("PopupMenu.show, Escape", "skipped: input permission denied"));
+            return;
+        }
+        robot.skipped().clear();
+        // inside the menu once it is shown (its top left corner at POPUP_X, POPUP_Y of the canvas)
+        Point probe = new Point(canvas.x + POPUP_X + 16, canvas.y + POPUP_Y + 10);
+        int before = robot.pixel(probe);
+        Thread shower = new Thread(() -> m.popup.show(m.canvas, POPUP_X, POPUP_Y), "showcase-popup-menu");
         shower.setDaemon(true);
         shower.start();
         robot.delay(700);
         images.put("popup-menu", robot.capture(new Rectangle(canvas.x, canvas.y, Math.min(size.width, 360),
                 Math.min(size.height, 300))));
-        // the first Escape is always sent : show() returns at once on X11 (XPopupMenuPeer maps the menu and grabs the
-        // input) and macOS, the menu is open all the same
         boolean escaped = false;
         int attempt = 0;
-        do {
-            attempt++;
-            if (robot.key(KeyEvent.VK_ESCAPE)) {
-                escaped = true;
+        String value;
+        if (Platforms.isWindows()) {
+            boolean tracked = shower.isAlive();
+            while (shower.isAlive() && attempt < ATTEMPTS) {
+                attempt++;
+                if (robot.key(KeyEvent.VK_ESCAPE)) {
+                    escaped = true;
+                }
+                shower.join(TimeUnit.SECONDS.toMillis(attempt == ATTEMPTS ? 3 : 1));
             }
-            shower.join(TimeUnit.SECONDS.toMillis(attempt == ATTEMPTS ? 3 : 1));
-        } while (shower.isAlive() && attempt < ATTEMPTS);
+            value = !tracked ? "not open before Escape" : !escaped ? "skipped: not focused"
+                    : !shower.isAlive() ? "closed" : "still open";
+        } else {
+            // read as the pixel before show() (not from the capture, scaled on HiDPI screens)
+            boolean shown = robot.pixel(probe) != before;
+            boolean gone;
+            do {
+                attempt++;
+                if (robot.key(KeyEvent.VK_ESCAPE)) {
+                    escaped = true;
+                }
+                gone = robot.waitForPixel(probe, before, attempt == ATTEMPTS ? 3000 : 1000);
+            } while (!gone && attempt < ATTEMPTS);
+            value = RobotSession.screenCaptureDenied() ? "skipped: screen capture denied" : !shown ? "not shown"
+                    : !escaped ? "skipped: not focused" : gone ? "closed" : "still open";
+        }
         checks.add(Check.attempts("PopupMenu Escape", attempt));
-        boolean sent = escaped;
-        boolean returned = !shower.isAlive();
-        checks.add(Checks.expect("PopupMenu.show(canvas, 30, 30), then Escape", "closed",
-                () -> !sent ? "skipped: not focused" : returned ? "closed" : "still open"));
+        if (!value.equals("closed")) {
+            skipped.addAll(robot.skipped());
+        }
+        checks.add(Checks.expect("PopupMenu.show(canvas, 30, 30), then Escape", "closed", () -> value));
     }
 
     /**
