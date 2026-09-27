@@ -6,7 +6,6 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
-import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
@@ -16,9 +15,10 @@ import java.util.List;
 import java.util.Map;
 
 import io.quarkiverse.desktop.showcase.core.Checks;
+import io.quarkiverse.desktop.showcase.core.Grid;
 
 /**
- * Helpers shared by the Java2D pages : a grid of captioned tiles painted offscreen (capture method C), a checkerboard
+ * Helpers shared by the Java2D pages (with the tile {@link Grid} and the image {@code Slot} of the core) : a checkerboard
  * showing translucency, a nearest neighbor magnifier, pixel probes, image differences, and the reference scene painted
  * into every kind of surface (buffered images of all types, volatile images, on-screen canvases and buffer strategies).
  * <p>
@@ -27,18 +27,18 @@ import io.quarkiverse.desktop.showcase.core.Checks;
  */
 final class Java2dSupport {
 
-    static final int BACKGROUND = 0xFFF7F9FC;
-    static final int BORDER = 0xFFB0BEC5;
-    static final int INK = 0xFF263238;
+    static final int BACKGROUND = Grid.BACKGROUND;
+    static final int BORDER = Grid.BORDER;
+    static final int INK = Grid.INK;
     static final int ACCENT = 0xFFE53935;
     static final int CHECKER_LIGHT = 0xFFFFFFFF;
     static final int CHECKER_DARK = 0xFFD5DBE1;
     static final int[] FILLS = { 0xFF4FC3F7, 0xFFFFB74D, 0xFF81C784, 0xFFE57373, 0xFFBA68C8, 0xFF4DB6AC };
 
-    /** Height of the caption area at the bottom of a tile. */
-    static final int CAPTION_HEIGHT = 24;
-    /** Margin around the drawing area of a tile. */
-    static final int INSET = 8;
+    /** Height of the caption area at the bottom of a tile ({@link Grid}). */
+    static final int CAPTION_HEIGHT = Grid.CAPTION_HEIGHT;
+    /** Margin around the drawing area of a tile ({@link Grid}). */
+    static final int INSET = Grid.INSET;
 
     /** Size of the reference scene (see {@link #scene}). */
     static final int SCENE_WIDTH = 200;
@@ -60,143 +60,21 @@ final class Java2dSupport {
     private Java2dSupport() {
     }
 
-    /**
-     * Paints the drawing area of a tile : {@code width x height} pixels, the origin at the top left corner of the area.
-     */
-    @FunctionalInterface
-    interface Painter {
-        void paint(Graphics2D g, int width, int height);
-    }
-
-    record Tile(String caption, Painter painter) {
-    }
-
-    /**
-     * Tiles painted in a grid : a background, a border, the drawing area (clipped, anti-aliasing on, pure strokes, gray
-     * scale text anti-aliasing, integer metrics) and a centered caption.
-     */
-    static final class Grid {
-
-        final int columns;
-        final int tileWidth;
-        final int tileHeight;
-        final List<Tile> tiles;
-
-        Grid(int columns, int tileWidth, int tileHeight, List<Tile> tiles) {
-            this.columns = columns;
-            this.tileWidth = tileWidth;
-            this.tileHeight = tileHeight;
-            this.tiles = List.copyOf(tiles);
-        }
-
-        int areaWidth() {
-            return tileWidth - 2 * INSET;
-        }
-
-        int areaHeight() {
-            return tileHeight - INSET - CAPTION_HEIGHT;
-        }
-
-        int width() {
-            return columns * tileWidth;
-        }
-
-        int height() {
-            return (tiles.size() + columns - 1) / columns * tileHeight;
-        }
-
-        /**
-         * Index of the tile with {@code caption}.
-         */
-        int index(String caption) {
-            for (int i = 0; i < tiles.size(); i++) {
-                if (tiles.get(i).caption().equals(caption)) {
-                    return i;
-                }
-            }
-            throw new IllegalArgumentException("No tile " + caption);
-        }
-
-        /**
-         * Top left corner of the drawing area of tile {@code index}, in the grid image.
-         */
-        Point origin(int index) {
-            return new Point((index % columns) * tileWidth + INSET, (index / columns) * tileHeight + INSET);
-        }
-
-        /**
-         * {@code #AARRGGBB} of the pixel at ({@code x}, {@code y}) of the drawing area of the tile with {@code caption}.
-         */
-        String probe(BufferedImage image, String caption, int x, int y) {
-            Point o = origin(index(caption));
-            return Checks.argb(image.getRGB(o.x + x, o.y + y));
-        }
-
-        BufferedImage paint() {
-            BufferedImage image = new BufferedImage(width(), height(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = image.createGraphics();
-            try {
-                for (int i = 0; i < tiles.size(); i++) {
-                    Graphics2D tile = (Graphics2D) g.create((i % columns) * tileWidth, (i / columns) * tileHeight,
-                            tileWidth, tileHeight);
-                    try {
-                        paintTile(tile, tiles.get(i));
-                    } finally {
-                        tile.dispose();
-                    }
-                }
-            } finally {
-                g.dispose();
-            }
-            return image;
-        }
-
-        private void paintTile(Graphics2D g, Tile tile) {
-            g.setColor(new Color(BACKGROUND, true));
-            g.fillRect(0, 0, tileWidth, tileHeight);
-            g.setColor(new Color(BORDER, true));
-            g.drawRect(2, 2, tileWidth - 5, tileHeight - 5);
-            Graphics2D area = (Graphics2D) g.create(INSET, INSET, areaWidth(), areaHeight());
-            try {
-                defaultHints(area);
-                area.setColor(new Color(INK, true));
-                area.setFont(font(Font.PLAIN, 11));
-                tile.painter().paint(area, areaWidth(), areaHeight());
-            } finally {
-                area.dispose();
-            }
-            textHints(g);
-            g.setColor(new Color(INK, true));
-            g.setFont(font(Font.PLAIN, 11));
-            String[] lines = tile.caption().split("\n");
-            int lineHeight = 12;
-            int y = tileHeight - 9 - (lines.length - 1) * lineHeight;
-            for (String line : lines) {
-                int width = g.getFontMetrics().stringWidth(line);
-                g.drawString(line, (tileWidth - width) / 2, y);
-                y += lineHeight;
-            }
-        }
-    }
-
     // ---------------------------------------------------------------------------------------------------- painting
 
     static Font font(int style, float size) {
-        return new Font(Font.DIALOG, style, 1).deriveFont(style, size);
+        return Grid.font(style, size);
     }
 
     /**
      * Anti-aliasing on, pure strokes, gray scale text anti-aliasing and integer metrics.
      */
     static void defaultHints(Graphics2D g) {
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
-        textHints(g);
+        Grid.defaultHints(g);
     }
 
     static void textHints(Graphics2D g) {
-        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
+        Grid.textHints(g);
     }
 
     /**
@@ -216,7 +94,7 @@ final class Java2dSupport {
     /**
      * A {@code width x height} image of {@code type} painted by {@code painter}.
      */
-    static BufferedImage image(int width, int height, int type, Painter painter) {
+    static BufferedImage image(int width, int height, int type, Grid.Painter painter) {
         BufferedImage image = new BufferedImage(width, height, type);
         Graphics2D g = image.createGraphics();
         try {
@@ -481,56 +359,6 @@ final class Java2dSupport {
                 + image.getSampleModel().getClass().getSimpleName() + " " + image.getSampleModel().getNumBands()
                 + " bands, " + image.getRaster().getDataBuffer().getClass().getSimpleName() + " "
                 + image.getRaster().getDataBuffer().getSize();
-    }
-
-    // -------------------------------------------------------------------------------------------------------- slots
-
-    /**
-     * A lightweight component showing an image set later (e.g. once the page is ready), scaled to a fixed size with
-     * nearest neighbor interpolation ; a light placeholder before.
-     */
-    static final class Slot extends java.awt.Component {
-
-        private final int width;
-        private final int height;
-        private transient BufferedImage image;
-
-        Slot(int width, int height) {
-            this.width = width;
-            this.height = height;
-        }
-
-        void setImage(BufferedImage image) {
-            this.image = image;
-            repaint();
-        }
-
-        @Override
-        public java.awt.Dimension getPreferredSize() {
-            return new java.awt.Dimension(width, height);
-        }
-
-        @Override
-        public java.awt.Dimension getMinimumSize() {
-            return getPreferredSize();
-        }
-
-        @Override
-        public void paint(java.awt.Graphics graphics) {
-            Graphics2D g = (Graphics2D) graphics.create();
-            try {
-                if (image == null) {
-                    g.setColor(new Color(0xFFECEFF1, true));
-                    g.fillRect(0, 0, width, height);
-                    return;
-                }
-                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                        RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-                g.drawImage(image, 0, 0, width, height, null);
-            } finally {
-                g.dispose();
-            }
-        }
     }
 
     // -------------------------------------------------------------------------------------------------------- names

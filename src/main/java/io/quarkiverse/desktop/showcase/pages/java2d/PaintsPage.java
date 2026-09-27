@@ -42,9 +42,9 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Grid;
+import io.quarkiverse.desktop.showcase.core.Grid.Tile;
 import io.quarkiverse.desktop.showcase.core.Ui;
-import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Grid;
-import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Tile;
 
 /**
  * Paints : {@code Color} with alpha, HSB, {@code brighter/darker}, {@code SystemColor} (loaded from the desktop by the

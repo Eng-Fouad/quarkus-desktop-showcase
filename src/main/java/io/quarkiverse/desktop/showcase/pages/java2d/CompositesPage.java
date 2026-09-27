@@ -35,10 +35,10 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.Grid;
+import io.quarkiverse.desktop.showcase.core.Grid.Tile;
 import io.quarkiverse.desktop.showcase.core.Ui;
-import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Grid;
 import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Surface;
-import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Tile;
 
 /**
  * Composites : the 12 Porter-Duff rules of {@code AlphaComposite} (with and without extra alpha), the XOR mode

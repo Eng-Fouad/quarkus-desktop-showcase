@@ -42,9 +42,9 @@ import io.quarkiverse.desktop.showcase.core.ChecksView;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
 import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
+import io.quarkiverse.desktop.showcase.core.Slot;
 import io.quarkiverse.desktop.showcase.core.Ui;
 import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Diff;
-import io.quarkiverse.desktop.showcase.pages.java2d.Java2dSupport.Slot;
 
 /**
  * The on-screen pipeline (Direct3D, OpenGL or GDI on Windows, XRender, X11 or GLX on Linux) : the reference scene
