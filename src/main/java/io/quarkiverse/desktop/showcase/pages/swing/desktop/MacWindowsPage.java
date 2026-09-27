@@ -44,6 +44,8 @@ import io.quarkiverse.desktop.showcase.pages.desktop.MacDesktop;
 @Singleton
 public class MacWindowsPage implements FeaturePage {
 
+    private static final String WINDOW_ALPHA = "Window.alpha";
+
     /** The JRootPane client properties of CPlatformWindow with the value the page sets, in order. */
     static Map<String, Object> properties(File document) {
         Map<String, Object> p = new LinkedHashMap<>();
@@ -53,7 +55,7 @@ public class MacWindowsPage implements FeaturePage {
         p.put("Window.documentModified", Boolean.TRUE);
         p.put("Window.documentFile", document);
         p.put("Window.shadow", Boolean.TRUE);
-        p.put("Window.alpha", 0.97f);
+        p.put(WINDOW_ALPHA, 0.97f);
         p.put("Window.closeable", Boolean.TRUE);
         p.put("Window.minimizable", Boolean.TRUE);
         p.put("Window.zoomable", Boolean.FALSE);
@@ -110,16 +112,35 @@ public class MacWindowsPage implements FeaturePage {
         plain.setVisible(true);
         styled.setVisible(true);
         // the others are applied to the native window when they change
-        properties(document).forEach((key, value) -> checks.add(Checks.run("putClientProperty " + key, () -> {
-            root.putClientProperty(key, value);
-            return value instanceof File ? "a file" : value;
-        })));
+        properties(document).forEach((key, value) -> checks.add(key.equals(WINDOW_ALPHA)
+                // CPlatformWindow applies Window.alpha with target.setOpacity, in the property change listener of the
+                // root pane (on this thread) : Frame.setOpacity refuses an opacity below 1 on a decorated frame. The
+                // value is stored before the listeners are notified (getClientProperty below)
+                ? Checks.expect("putClientProperty " + key, "IllegalComponentStateException: The frame is decorated",
+                        () -> exception(() -> root.putClientProperty(key, value)))
+                : Checks.run("putClientProperty " + key, () -> {
+                    root.putClientProperty(key, value);
+                    return value instanceof File ? "a file" : value;
+                })));
         properties(document).forEach((key, value) -> checks.add(Checks.expect("getClientProperty " + key,
                 value instanceof File ? "a file" : value, () -> {
                     Object v = root.getClientProperty(key);
                     return v instanceof File ? "a file" : v;
                 })));
         checks.add(Checks.expect("getClientProperty Window.style", "small", () -> root.getClientProperty("Window.style")));
+        // Window.alpha works on an undecorated frame (CPlatformWindow listens to the root pane once the native window
+        // exists : addNotify)
+        checks.add(Checks.expect("Window.alpha on an undecorated JFrame : getOpacity()", 0.97f, () -> {
+            JFrame undecorated = new JFrame("Undecorated");
+            undecorated.setUndecorated(true);
+            try {
+                undecorated.addNotify();
+                undecorated.getRootPane().putClientProperty(WINDOW_ALPHA, 0.97f);
+                return undecorated.getOpacity();
+            } finally {
+                undecorated.dispose();
+            }
+        }));
         // the window insets are read in ready(), once stable
         checks.add(Checks.expect("styled window isResizable()", true, styled::isResizable));
         results = ChecksView.table("macOS window properties", checks, 380, ChecksView.WIDTH);
@@ -174,6 +195,15 @@ public class MacWindowsPage implements FeaturePage {
         frame.setBounds(x, y, 360, 220);
         frames.add(frame);
         return frame;
+    }
+
+    private static String exception(Runnable action) {
+        try {
+            action.run();
+            return "no exception";
+        } catch (RuntimeException e) {
+            return e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
     }
 
     private static String insets(Insets insets) {
