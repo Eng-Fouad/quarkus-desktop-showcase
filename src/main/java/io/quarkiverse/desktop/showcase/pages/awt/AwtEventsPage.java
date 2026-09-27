@@ -1116,9 +1116,28 @@ public class AwtEventsPage implements FeaturePage {
         robot.delay(200);
         robot.idle();
         // 8 px inside the frame : Windows 11 rounds the corners of top-level windows, whatever is behind them shows
-        captures.put("canvas-screen", robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
-                CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16)));
+        BufferedImage screen = robot.capture(new java.awt.Rectangle(origin.x + 8, origin.y + 8,
+                CANVAS_WIDTH - 16, CANVAS_HEIGHT - 16));
+        if (Platforms.isMac()) {
+            snapBackground(screen);
+        }
+        captures.put("canvas-screen", screen);
         target.recording = false;
+    }
+
+    /**
+     * macOS : Robot reads the screen through the color profile of the display, and the colors it reads vary by a level
+     * or two from run to run (the canvas painted #37474F was read #36474F in most runs, #38474F in others, before and
+     * after the changes of the page) : the pixels of the capture within {@link RobotSession#COLOR_TOLERANCE} of the
+     * canvas color get the painted color ({@link RobotSession#snap}), the others (the text) stay as read.
+     */
+    private static void snapBackground(BufferedImage screen) {
+        for (int y = 0; y < screen.getHeight(); y++) {
+            for (int x = 0; x < screen.getWidth(); x++) {
+                int argb = screen.getRGB(x, y);
+                screen.setRGB(x, y, (argb & 0xFF000000) | RobotSession.snap(argb, CANVAS_COLOR));
+            }
+        }
     }
 
     private static String counts(List<String> log) {
