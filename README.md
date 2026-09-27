@@ -260,8 +260,10 @@ public class ShapesPage implements FeaturePage {
     override-redirect `POPUP` window), `Edt.untilStable` for bounds that a window manager configures in several steps;
   - on macOS Robot needs the Accessibility (input) and Screen Recording (pixels) permissions (TCC) of the application
     that started the showcase (environment keys `macos.tcc.input` and `macos.tcc.screenCapture`, probed with
-    `-Dshowcase.robot=true`): without them the input is silently dropped (the retries run to their limit, the checks
-    tell) and the pixel waits stop early when the denial is known;
+    `-Dshowcase.robot=true`: two always-on-top windows read with a tolerance for 1.5 s, a pointer move tried three
+    times). When a denial is known, `RobotSession` presses no key or button (skipped, as without the focus) and its
+    pixel waits (`waitForPixel`, `raiseUntil`, `awaitVisible`) end at the first mismatch without raising windows;
+    without the probe the input is silently dropped (the retries run to their limit, the checks tell);
   - a Robot sequence whose effect is missing is done again (bounded, the window focused again first), and the number
     of attempts is recorded with `Check.attempts(action, n)`: an informational check in `report.json` only (not painted
     by `ChecksView`), whose differences `Compare` reports as `attempts:` notes, not as mismatches. What was missing is

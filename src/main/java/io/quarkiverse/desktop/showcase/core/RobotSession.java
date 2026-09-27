@@ -38,7 +38,8 @@ import org.jboss.logging.Logger;
  * to come back ({@link Edt#awaitFocus} : X11 moves the focus with FocusOut then FocusIn, Windows has no foreground
  * window during an activation change), otherwise it is skipped (the method returns {@code false} and
  * {@link #skipped()} lists it); everything pressed is released and the mouse pointer is moved back when the session is
- * closed.
+ * closed. On macOS, Robot input needs the Accessibility permission (TCC) of the application that started the showcase :
+ * when it is known to be denied ({@link #inputDenied()}) no key or button is pressed either (skipped the same way).
  * <p>
  * Keyboard input waits for each key to be processed : after a press (a release), the next input is only sent once the
  * {@code KEY_PRESSED} ({@code KEY_RELEASED}) event of that key was dispatched on the EDT (at most
@@ -52,8 +53,8 @@ import org.jboss.logging.Logger;
  * bring a window above the always-on-top windows that cover it (without a window manager, X11 keeps them in the order
  * they were mapped ; a window manager restacking its windows may cover an override-redirect POPUP), and
  * {@link #awaitVisible} for the probes of a page covered by other applications. On macOS they need the Screen Recording
- * permission (TCC) : when it is known to be denied ({@code macos.tcc.screenCapture = false}) the waits end at the
- * first mismatch.
+ * permission (TCC) : when it is known to be denied ({@link #screenCaptureDenied()}) {@link #waitForPixel},
+ * {@link #raiseUntil} and {@link #awaitVisible} end at the first mismatch, without raising any window.
  */
 public final class RobotSession implements AutoCloseable {
 
@@ -134,6 +135,22 @@ public final class RobotSession implements AutoCloseable {
         return robot;
     }
 
+    /**
+     * {@code true} when the macOS Screen Recording permission was probed ({@code -Dshowcase.robot=true},
+     * {@code macos.tcc.screenCapture = false}) and is denied : the screen pixels never show the showcase windows.
+     */
+    public static boolean screenCaptureDenied() {
+        return MacEnvironment.screenCaptureDenied();
+    }
+
+    /**
+     * {@code true} when the macOS Accessibility permission was probed ({@code -Dshowcase.robot=true},
+     * {@code macos.tcc.input = false}) and is denied : macOS drops the events that Robot posts.
+     */
+    public static boolean inputDenied() {
+        return MacEnvironment.inputDenied();
+    }
+
     /** Where the pointer was when the session started ({@code null} if unknown). */
     public Point savedPointer() {
         return pointer;
@@ -195,9 +212,14 @@ public final class RobotSession implements AutoCloseable {
      * Presses (and keeps pressed) {@code keyCode} once a showcase window is focused (waiting a moment for the focus to
      * come back, e.g. during an activation change), then waits until its KEY_PRESSED event was dispatched.
      *
-     * @return {@code false} (nothing pressed) when no showcase window is focused
+     * @return {@code false} (nothing pressed) when no showcase window is focused, or the input is known to be dropped
+     *         ({@link #inputDenied()})
      */
     public boolean keyPress(int keyCode) {
+        if (inputDenied()) {
+            skipped.add("key " + KeyEvent.getKeyText(keyCode) + " (input permission denied)");
+            return false;
+        }
         if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
             skipped.add("key " + KeyEvent.getKeyText(keyCode));
             return false;
@@ -265,9 +287,14 @@ public final class RobotSession implements AutoCloseable {
      * Presses the mouse buttons {@code mask} ({@link java.awt.event.InputEvent#BUTTON1_DOWN_MASK}...) if a showcase
      * window is focused (waiting a moment for the focus to come back).
      *
-     * @return {@code false} (nothing pressed) when no showcase window is focused
+     * @return {@code false} (nothing pressed) when no showcase window is focused, or the input is known to be dropped
+     *         ({@link #inputDenied()})
      */
     public boolean press(int mask) {
+        if (inputDenied()) {
+            skipped.add("mouse press (input permission denied)");
+            return false;
+        }
         if (!Edt.awaitFocus(FOCUS_WAIT_MILLIS)) {
             skipped.add("mouse press");
             return false;
@@ -393,7 +420,7 @@ public final class RobotSession implements AutoCloseable {
                 return true;
             }
             lastMismatch = rgb(found) + " at " + p.x + "," + p.y;
-            if (System.nanoTime() - deadline > 0 || MacEnvironment.screenCaptureDenied()) {
+            if (System.nanoTime() - deadline > 0 || screenCaptureDenied()) {
                 return false;
             }
             robot.delay(50);
@@ -410,7 +437,8 @@ public final class RobotSession implements AutoCloseable {
      * backdrop" when the content varies). A focused window may still be covered : always-on-top windows keep the order
      * they were mapped in without a window manager (X11), and a window manager restacking the windows it manages may
      * cover an override-redirect window (Window.Type.POPUP) it does not manage. Each raise is logged
-     * ({@link #logRetry}, {@code action} and the pixel found).
+     * ({@link #logRetry}, {@code action} and the pixel found). No raise when the screen pixels are known not to show the
+     * showcase windows ({@link #screenCaptureDenied()}).
      *
      * @return the number of raises it took ({@code 0} : visible at once), {@code -1} if still covered
      */
@@ -420,7 +448,7 @@ public final class RobotSession implements AutoCloseable {
             if (waitForPixel(p, visible, waitMillis)) {
                 return raises;
             }
-            if (raises >= maxRaises) {
+            if (raises >= maxRaises || screenCaptureDenied()) {
                 return -1;
             }
             logRetry(action, raises + 1, "covered : " + lastMismatch);
@@ -434,7 +462,9 @@ public final class RobotSession implements AutoCloseable {
     /**
      * Waits until the screen pixels at {@code probes} have their expected colors ({@code probes} maps a point to an
      * RGB color), i.e. until the page is visible on screen : windows of other applications (or other showcase
-     * processes) may cover it. The window of {@code component} is brought to the front between the attempts.
+     * processes) may cover it. The window of {@code component} is brought to the front between the attempts (8 attempts,
+     * 400 ms apart), except when the screen pixels are known not to show the showcase windows
+     * ({@link #screenCaptureDenied()} : one attempt).
      *
      * @return {@code false} if the page stayed covered
      */
@@ -452,6 +482,9 @@ public final class RobotSession implements AutoCloseable {
             }
             if (visible) {
                 return true;
+            }
+            if (screenCaptureDenied()) {
+                return false;
             }
             Focus.onEdt(() -> {
                 Window window = windowOf(component);

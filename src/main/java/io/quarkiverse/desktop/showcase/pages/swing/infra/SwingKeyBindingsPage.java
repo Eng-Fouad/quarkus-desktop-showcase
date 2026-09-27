@@ -777,12 +777,13 @@ public class SwingKeyBindingsPage implements FeaturePage {
 
     /**
      * {@link #typeOnce}, again while the typing is incomplete (at most {@link #ATTEMPTS} times) : the window is focused
-     * again ({@link Focus#acquireBlocking}) and the Robot field emptied first.
+     * again ({@link Focus#acquireBlocking}) and the Robot field emptied first. Not again when the input is known to be
+     * dropped (macOS without the Accessibility permission : {@link RobotSession#inputDenied()}).
      */
     private static Typing type(Demo u) throws Exception {
         Typing outcome = typeOnce(u);
         int attempt = 1;
-        while (!outcome.complete() && attempt < ATTEMPTS) {
+        while (!outcome.complete() && attempt < ATTEMPTS && !RobotSession.inputDenied()) {
             RobotSession.logRetry("swing-keybindings Robot typing", attempt, outcome.reason());
             attempt++;
             JTextField field = u.robotField;
@@ -855,10 +856,11 @@ public class SwingKeyBindingsPage implements FeaturePage {
     /**
      * {@code true} when a showcase window is focused and the Robot field owns the focus, waiting a moment for the focus
      * to come back (X11 moves it with FocusOut then FocusIn, the field gains it after its window : see
-     * {@link Edt#awaitFocus}, the same wait as {@link RobotSession} before each press).
+     * {@link Edt#awaitFocus}, the same wait as {@link RobotSession} before each press), and the input is not known to be
+     * dropped ({@link RobotSession#inputDenied()}, as in {@link RobotSession}).
      */
     private static boolean sendable(Demo u) {
-        return Edt.awaitFocus(RobotSession.FOCUS_WAIT_MILLIS, u.robotFieldFocused::get);
+        return !RobotSession.inputDenied() && Edt.awaitFocus(RobotSession.FOCUS_WAIT_MILLIS, u.robotFieldFocused::get);
     }
 
     /**
@@ -887,7 +889,8 @@ public class SwingKeyBindingsPage implements FeaturePage {
     }
 
     private static String focusReason(Demo u, int received) {
-        return !Edt.ownsFocus() ? "not focused"
+        return RobotSession.inputDenied() ? "input permission denied"
+                : !Edt.ownsFocus() ? "not focused"
                 : !u.robotFieldFocused.get() ? "the Robot field lost the focus"
                         : "keyboard input not received after " + received
                                 + " key presses (another application owns the foreground)";

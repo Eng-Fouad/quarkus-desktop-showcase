@@ -332,7 +332,8 @@ public class AwtMixingPage implements FeaturePage {
                         String value = String.format(java.util.Locale.ROOT, "#%06X", rgb);
                         if (!stillFocused || covered) {
                             checks.add(Check.info("pixel " + name, !stillFocused ? "skipped: focus lost"
-                                    : "skipped: window covered"));
+                                    : RobotSession.screenCaptureDenied() ? "skipped: screen capture denied"
+                                            : "skipped: window covered"));
                         } else if (want == null) {
                             checks.add(Check.info("pixel " + name, value));
                         } else {
@@ -381,7 +382,8 @@ public class AwtMixingPage implements FeaturePage {
                 }))
                 .thenCompose(result -> {
                     boolean lost = !Edt.ownsFocus() || result.getKey().get("reference") != REFERENCE_TEAL;
-                    if (lost && attempt < ATTEMPTS) {
+                    // no retry when the screen pixels are known not to show the window (macOS permission)
+                    if (lost && attempt < ATTEMPTS && !RobotSession.screenCaptureDenied()) {
                         RobotSession.logRetry("swing-awt-mixing screen pixels", attempt, "focus or window lost");
                         return Focus.acquire(window).thenCompose(a -> sample(gc, reference, canvas, popup, points, area,
                                 window, checks, attempt + 1));
@@ -417,7 +419,9 @@ public class AwtMixingPage implements FeaturePage {
     }
 
     /**
-     * Polls (off the event dispatch thread) until the three points show their colors, at most {@code millis}.
+     * Polls (off the event dispatch thread) until the three points show their colors, at most {@code millis} : one read
+     * only when the screen pixels are known not to show the showcase windows (macOS without the Screen Recording
+     * permission, {@link RobotSession#screenCaptureDenied()}).
      */
     private static boolean painted(GraphicsConfiguration gc, Point reference, Point canvas, Point popup, long millis)
             throws Exception {
@@ -427,7 +431,7 @@ public class AwtMixingPage implements FeaturePage {
             boolean ok = (robot.getPixelColor(reference.x, reference.y).getRGB() & 0xFFFFFF) == REFERENCE_TEAL
                     && (robot.getPixelColor(canvas.x, canvas.y).getRGB() & 0xFFFFFF) == CANVAS_RED
                     && (robot.getPixelColor(popup.x, popup.y).getRGB() & 0xFFFFFF) == POPUP_PURPLE;
-            if (ok || System.nanoTime() > deadline) {
+            if (ok || System.nanoTime() > deadline || RobotSession.screenCaptureDenied()) {
                 return ok;
             }
             Thread.sleep(100);
