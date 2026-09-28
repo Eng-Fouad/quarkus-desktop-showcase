@@ -150,12 +150,13 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   understands package entries, `fqcn#member` entries and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
   `java-beans.jdk-classes` properties), the lists of `--exact-reachability-metadata` builds (`REFLECTIVE_TYPES`,
-  `NEGATIVE_CLASS_LOOKUPS`, `METHOD_LOOKUPS`), the constants of the extension code (`*SERIALIZABLE*` classes, and the
-  `ABSENT_RESOURCE_BUNDLES` that the JDK looks up but does not have), and also lists stale entries (names that do not
-  exist in the JDK) and the lookups of classes and resources that do not exist in the JDK (expected to fail, only an
-  issue with `--exact-reachability-metadata`; the class lookups that quarkus-desktop registers for it, the
-  `NEGATIVE_CLASS_LOOKUPS`, the JavaBeans probes of its classes and the lookups of the absent bundles, are only
-  counted). What the showcase registers itself (its `reachability-metadata.json`, or the one given with
+  `NEGATIVE_CLASS_LOOKUPS`, `METHOD_LOOKUPS`, `RESOURCE_LOOKUPS`), the constants of the extension code (`*SERIALIZABLE*`
+  classes, and the `ABSENT_RESOURCE_BUNDLES` that the JDK looks up but does not have), and also lists stale entries
+  (names that do not exist in the JDK, lookups of resources that exist) and the lookups of classes and resources that
+  do not exist in the JDK (expected to fail, only an issue with `--exact-reachability-metadata`; the lookups that
+  quarkus-desktop registers for it, the `NEGATIVE_CLASS_LOOKUPS`, the JavaBeans probes of its classes, the lookups of
+  the absent bundles and the `RESOURCE_LOOKUPS`, are only counted). What the showcase registers itself (its
+  `reachability-metadata.json`, or the one given with
   `--app-metadata`) is subtracted and listed apart. Run it on the platform of the trace (the Linux cycle runs it in the
   container, where `~/.m2` is the Docker volume): the JDK running the tool is the universe, so on another platform a
   class or resource missing from that JDK may exist on the platform of the trace. The lookups that quarkus-desktop

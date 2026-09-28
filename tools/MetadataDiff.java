@@ -77,7 +77,7 @@ public class MetadataDiff {
             "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
             "JNI_RUNTIME_ACCESS_CLASSES", "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES",
             "RESOURCE_GLOBS", "SERVICE_PROVIDERS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES", "REFLECTIVE_TYPES",
-            "NEGATIVE_CLASS_LOOKUPS", "METHOD_LOOKUPS");
+            "NEGATIVE_CLASS_LOOKUPS", "METHOD_LOOKUPS", "RESOURCE_LOOKUPS");
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
@@ -171,6 +171,7 @@ public class MetadataDiff {
         Map<String, String> missingReflection = new TreeMap<>();
         Set<String> negativeLookups = new TreeSet<>();
         Set<String> registeredNegativeLookups = new TreeSet<>();
+        Set<String> registeredResourceLookups = new TreeSet<>();
         Set<String> registeredByApp = new TreeSet<>();
         Map<String, String> byQuarkusAwt = new TreeMap<>();
         Set<String> serialization = new TreeSet<>();
@@ -292,6 +293,11 @@ public class MetadataDiff {
                 registeredByApp.add("resource " + glob);
                 continue;
             }
+            if (reg.resourceLookups.stream().anyMatch(p -> p.matcher(glob).matches())) {
+                // registered by name (RESOURCE_LOOKUPS) : recognized on any platform
+                registeredResourceLookups.add(glob);
+                continue;
+            }
             if (quarkusAwtGlobs.stream().anyMatch(p -> p.matcher(glob).matches())) {
                 byQuarkusAwt.put("resource " + glob, "");
                 continue;
@@ -325,6 +331,8 @@ public class MetadataDiff {
         list("Resources not included", missingResources);
         list("Lookups of resources that do not exist in this JDK (expected to fail, a native executable finds none either : "
                 + "only an issue with --exact-reachability-metadata)", absentResources);
+        System.out.println("\n## Lookups of resources that do not exist in this JDK, registered by quarkus-desktop "
+                + "(RESOURCE_LOOKUPS) (" + registeredResourceLookups.size() + ")");
         list("Resource bundles not included", missingBundles);
         list("Serialization of desktop types (no list kind : the *SERIALIZABLE* constants of the extension code)",
                 serialization);
@@ -431,6 +439,8 @@ public class MetadataDiff {
         // the ABSENT_RESOURCE_BUNDLES constants (also in bundles)
         final Set<String> absentBundles = new HashSet<>();
         final List<Pattern> globs = new ArrayList<>();
+        // RESOURCE_LOOKUPS : resources that the JDK looks up and does not have, registered for exact metadata
+        final List<Pattern> resourceLookups = new ArrayList<>();
         final Map<String, List<String>> platformLists = new TreeMap<>();
         // classes registered with their public constructors, methods (inherited ones included) and fields
         final Set<String> publicMembers = new HashSet<>();
@@ -473,6 +483,7 @@ public class MetadataDiff {
                         }
                         case "RESOURCE_BUNDLES" -> bundles.add(v.contains(":") ? v.substring(v.indexOf(':') + 1) : v);
                         case "RESOURCE_GLOBS" -> globs.add(globToRegex(v));
+                        case "RESOURCE_LOOKUPS" -> resourceLookups.add(globToRegex(v));
                         case "REFLECTIVE_PUBLIC_MEMBERS" -> publicMembers.add(v);
                         case "REFLECTIVE_TYPES" -> {
                             types.add(v);
@@ -719,6 +730,17 @@ public class MetadataDiff {
                     return;
                 }
                 String kind = platformList ? field.substring(field.indexOf('_') + 1) : field;
+                if (kind.equals("RESOURCE_LOOKUPS")) {
+                    // lookups expected to fail : the resources must not exist (the extension registers the ones that
+                    // exist with RESOURCE_GLOBS)
+                    for (String glob : values) {
+                        Pattern pattern = globToRegex(glob);
+                        if (universe.resources.stream().anyMatch(r -> pattern.matcher(r).matches())) {
+                            stale.add(list + ": " + glob + " (a resource of the JDK matches : a RESOURCE_GLOBS entry)");
+                        }
+                    }
+                    return;
+                }
                 if (kind.equals("RESOURCE_GLOBS")) {
                     for (String glob : values) {
                         Pattern pattern = globToRegex(glob);
