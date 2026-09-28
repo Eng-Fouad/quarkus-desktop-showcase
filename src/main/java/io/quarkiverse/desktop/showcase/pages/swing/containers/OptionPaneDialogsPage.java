@@ -18,7 +18,6 @@ import java.awt.FlowLayout;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Point;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -55,7 +54,6 @@ import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
 import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
-import io.quarkiverse.desktop.showcase.core.Focus;
 import io.quarkiverse.desktop.showcase.core.Snapshots;
 import io.quarkiverse.desktop.showcase.core.Ui;
 
@@ -76,7 +74,6 @@ import io.quarkiverse.desktop.showcase.core.Ui;
 public class OptionPaneDialogsPage implements FeaturePage {
 
     private static final int WINDOW_X = 1460;
-    private static final Point WINDOW_LOCATION = new Point(WINDOW_X, 320);
 
     private State state;
 
@@ -416,10 +413,6 @@ public class OptionPaneDialogsPage implements FeaturePage {
                     answers(s, checks);
                     showOptionDialog(s, owner, checks);
                     showWindow(s, checks);
-                })
-                .thenCompose(v -> placed(s.window, WINDOW_LOCATION))
-                .thenAccept(v -> {
-                    checks.add(Checks.info("JWindow: bounds", () -> rect(s.window.getBounds())));
                     s.modal = modalDialog(owner);
                     checks.add(Checks.expect("modal: modal, modality type, focusable window state",
                             "true APPLICATION_MODAL false", () -> s.modal.isModal() + " " + s.modal.getModalityType()
@@ -554,30 +547,21 @@ public class OptionPaneDialogsPage implements FeaturePage {
         buttons.add(new JButton("Dismiss"));
         content.add(buttons, BorderLayout.SOUTH);
         window.setContentPane(content);
+        // located before pack creates the X window : a new window starts in the upper left corner of the screen area
+        // outside the insets (java.awt.Window : 0,24 below the tray of the Linux image). Packed there, then moved, the
+        // X window was resized at 0,24 and then moved : X11 reports both in ConfigureNotify events that the peer of a
+        // JWindow applies to its bounds from the toolkit thread, and the bounds read 0,24 again after setLocation until
+        // the second one came (openbox keeps the location that the window asks for)
+        window.setLocation(WINDOW_X, 320);
         window.pack();
-        window.setLocation(WINDOW_LOCATION);
         window.setVisible(true);
         s.window = window;
         checks.add(Checks.expect("JWindow: showing, focusable window state, type", "true false NORMAL",
                 () -> window.isShowing() + " " + window.getFocusableWindowState() + " " + window.getType()));
         checks.add(Checks.expect("JWindow: owner", "javax.swing.SwingUtilities$SharedOwnerFrame",
                 () -> window.getOwner().getClass().getName()));
+        checks.add(Checks.info("JWindow: bounds", () -> rect(window.getBounds())));
         s.extras.put("jwindow", Snapshots.render(window.getRootPane()));
-    }
-
-    /**
-     * Completes once {@code window} is at {@code location}. An X11 window manager places a window itself at times,
-     * whatever location the application asked for (openbox : the upper left corner of the free area of the screen), and
-     * X11 updates the bounds of the window from the toolkit thread : the window is moved back once.
-     */
-    private static CompletionStage<Void> placed(Window window, Point location) {
-        return Focus.awaitPlaced(window, location, 1, 2000).thenCompose(placed -> {
-            if (placed) {
-                return CompletableFuture.completedFuture(null);
-            }
-            window.setLocation(location);
-            return Focus.awaitPlaced(window, location, 1, 2000).thenApply(again -> null);
-        });
     }
 
     private static JDialog modalDialog(Window owner) {
