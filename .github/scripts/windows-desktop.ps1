@@ -196,8 +196,8 @@ if ($Prepare) {
         powercfg /change standby-timeout-ac 0
     }
     Step 'Windows PowerShell' {
-        # the other application of dt-clipboard (showcase/desktop/foreign-clipboard.ps1) : its first start on a fresh
-        # runner, outside the timed page
+        # the other application of dt-clipboard (showcase/desktop/foreign-clipboard.ps1) : its first start (34 s on
+        # windows-11-arm, under 1 s on windows-2025), outside the timed page
         $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $time = Measure-Command {
             & $ps -NoProfile -NonInteractive -Sta -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing' | Out-Host

@@ -121,12 +121,12 @@ public class ClipboardPage implements FeaturePage {
     }
 
     /**
-     * The showcase lock (up to 25 s) and the other process (up to 25 s : the first start of Windows PowerShell with
-     * Windows Forms is slow on a fresh machine) on top of the round trips.
+     * The showcase lock (up to 25 s) and the other process (up to 60 s : the first start of Windows PowerShell with
+     * Windows Forms on Windows arm64) on top of the round trips.
      */
     @Override
     public int readyTimeoutSeconds() {
-        return 75;
+        return 100;
     }
 
     @Override

@@ -29,7 +29,11 @@ import io.quarkiverse.desktop.showcase.core.Platforms;
  */
 final class ForeignClipboard {
 
-    private static final long TIMEOUT_SECONDS = 25;
+    /**
+     * The first start of Windows PowerShell with Windows Forms on Windows arm64 takes more than 30 s (34 s on the
+     * windows-11-arm runner, under 1 s on windows-2025).
+     */
+    private static final long TIMEOUT_SECONDS = 60;
 
     /** The results of the child process (key : decoded value), or why it did not run. */
     record Result(Map<String, String> values, String skipped, String error) {
