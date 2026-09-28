@@ -32,7 +32,9 @@ import org.jboss.logging.Logger;
  * another process received the last input (for instance another showcase process that just released the focus lock) :
  * the later attempts then click the title bar of a decorated window of the showcase, as a user would (a click
  * activates the window it lands on), only after checking that the window under the point belongs to this process, and
- * the mouse pointer is moved back. Bounded : {@link #MAX_ATTEMPTS} attempts.
+ * the mouse pointer is moved back. When the windows of another process cover every title bar (the application in front
+ * of a user's desktop), the window is first raised above them without being activated (always on top, then not). Bounded
+ * : {@link #MAX_ATTEMPTS} attempts.
  * <p>
  * The title bar click is Windows only : {@link Foreground} knows the foreground there only. On Linux and macOS the Java
  * focus state is trusted and each attempt is {@code toFront} and {@code requestFocus}. On X11 they ask the window
@@ -148,9 +150,49 @@ public final class Focus {
 
     /**
      * Clicks the middle of the title bar of {@code window} (or of a decorated owner, or of another decorated showcase
-     * frame) : only where the window under the point belongs to this process.
+     * frame) : only where the window under the point belongs to this process. On Windows, when the windows of another
+     * process cover every title bar (the application in front of a user's desktop), {@code window} is raised above them
+     * first ({@link #raise}).
      */
     private static boolean clickTitleBar(Window window) throws Exception {
+        if (clickUncoveredTitleBar(window) || Platforms.isWindows() && raise(window) && clickUncoveredTitleBar(window)) {
+            return true;
+        }
+        LOG.infof("Focus: no title bar of a showcase window is uncovered, no click");
+        return false;
+    }
+
+    /**
+     * Windows : raises {@code window} (or its first decorated owner) above the windows of the other processes, without
+     * activating it. A background process may not bring its windows in front of the foreground window ({@code toFront}
+     * is refused with the activation), but it may make a window always on top, and a window that is no longer always on
+     * top stays above the other windows : its title bar can then be clicked. Only a window that is not always on top
+     * already ; {@code false} when there is none.
+     */
+    private static boolean raise(Window window) throws Exception {
+        String raised = onEdt(() -> {
+            for (Window w = window; w != null; w = w.getOwner()) {
+                if (w.isShowing() && decorated(w) && !w.isAlwaysOnTop() && w.isAlwaysOnTopSupported()) {
+                    w.setAlwaysOnTop(true);
+                    w.setAlwaysOnTop(false);
+                    return title(w);
+                }
+            }
+            return null;
+        });
+        if (raised == null) {
+            return false;
+        }
+        LOG.infof("Focus: every title bar covered by another process, %s raised above it", raised);
+        // the new stacking order is applied by the toolkit thread : WindowFromPoint sees it a moment later
+        sleep(150);
+        return true;
+    }
+
+    /**
+     * {@link #clickTitleBar} without the raise : {@code false} when no title bar of a showcase window is uncovered.
+     */
+    private static boolean clickUncoveredTitleBar(Window window) throws Exception {
         List<Point> points = onEdt(() -> {
             List<Window> candidates = new ArrayList<>();
             for (Window w = window; w != null; w = w.getOwner()) {
@@ -198,7 +240,6 @@ public final class Focus {
                 return true;
             }
         }
-        LOG.infof("Focus: no title bar of a showcase window is uncovered, no click");
         return false;
     }
 

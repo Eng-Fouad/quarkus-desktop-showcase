@@ -299,7 +299,9 @@ public class ShapesPage implements FeaturePage {
   - `Focus.acquire(window)` brings a window to the front and waits until it really has the focus (at most 4 attempts);
     on Windows the later attempts click the title bar of a decorated showcase window (its middle first), as a user
     would, only where `WindowFromPoint` says the window under the point belongs to the showcase, and move the pointer
-    back. On Linux and macOS `core.Foreground` knows nothing (the Java focus state is trusted) and each attempt is
+    back; when the windows of another process cover every title bar (the application in front of a user's desktop),
+    the window is first raised above them without being activated (always on top, then not: a background process may
+    do that, not `toFront`). On Linux and macOS `core.Foreground` knows nothing (the Java focus state is trusted) and each attempt is
     `toFront` and `requestFocus` only: X11 activates windows through the window manager (`_NET_ACTIVE_WINDOW`; the
     Docker window manager has no mouse bindings, a click would activate nothing), and macOS only focuses the windows of
     the active application, which AWT never activates. With `-Dshowcase.activate=true` (unattended runs only, such as
