@@ -20,9 +20,10 @@ The awt-only variant proves that quarkus-desktop-awt works without Swing applica
 
 ## Requirements
 
-- Windows x64, Linux x64, or macOS on Apple silicon. Native executables on macOS need the quarkus-awt of the Quarkus
-  pull request [Enable quarkus-awt on macOS](https://github.com/quarkusio/quarkus/pull/56979) (not in a Quarkus release
-  yet: build Quarkus from it) and GraalVM 25.1 or later: see [Verifying on macOS](#verifying-on-macos)
+- Windows x64, Linux x64 or arm64, or macOS on Apple silicon (Windows arm64: JVM mode only, GraalVM has no native
+  image builder for it). Native executables on macOS need the quarkus-awt of the Quarkus pull request
+  [Enable quarkus-awt on macOS](https://github.com/quarkusio/quarkus/pull/56979) (not in a Quarkus release yet: build
+  Quarkus from it) and GraalVM 25.1 or later: see [Verifying on macOS](#verifying-on-macos)
 - JDK 25 for the JVM mode and the tools, GraalVM for JDK 25 for native executables (`GRAALVM_HOME`)
 - quarkus-desktop `999-SNAPSHOT` installed in the local Maven repository: clone
   [quarkus-desktop](https://github.com/Eng-Fouad/quarkus-desktop) and run `mvn install` in it
@@ -68,7 +69,7 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
 ```
 
 `tools/Snapshot.java jvm|native [label] [--pages=ids] [--categories=names] [--awt-only] [--hidpi]
-[--pipeline=gdi|opengl|x11] [--screen] [--trace] [-- options...]`:
+[--pipeline=gdi|opengl|x11] [--screen] [--trace] [--timeout=seconds] [-- options...]`:
 
 - `-Duser.language=en -Duser.country=US` and `-Dsun.java2d.uiScale=1` are added unless given after `--` (a native
   executable defaults to the locale of the build machine; AWT heavyweight components render correctly with `printAll`
@@ -84,18 +85,26 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
 - `--awt-only` runs the awt-only variant (`target/awt-only`). `--screen` also saves a Robot screen capture of the
   window per page (`<page>--screen.png`, reported as `SCREEN`, never a mismatch).
 - `--trace` (JVM only) runs under the GraalVM tracing agent (`comparison/<label>/metadata`), see below.
+- `--timeout`: the run is killed after that many seconds (900 by default), reported as `WATCHDOG` in its `run.log`.
 - `-- -Dshowcase.beans.dump-dir=<directory>` writes every XML text that the JavaBeans pages encode (and the decoding
   exceptions) to `<directory>/<sequence>-<sha256>.xml`: run it with one directory per runtime, then diff them when an
   `XML : lines, SHA-256` check differs.
 
-`java tools/Cycle.java <label> [--trace] [--exact] [--awt-only] [--hidpi] [--pipeline=...] [--pages=...] [--offline]
-[--skip-jvm] [--skip-native-build] [--maven-args=a,b] [--native-args=a,b] [-- options]` runs a whole iteration: JVM build and
-snapshots, native build and snapshots, comparison (`comparison/{jvm,native,diff,logs}-<label>`). Run it with GraalVM's
+`java tools/Cycle.java <label> [--trace] [--exact] [--require-focus] [--jvm-only] [--awt-only] [--hidpi]
+[--pipeline=...] [--pages=...] [--categories=names] [--offline] [--skip-jvm] [--skip-native-build] [--maven-args=a,b]
+[--native-args=a,b] [-- options]` runs a whole iteration: JVM build and snapshots, native build and snapshots,
+comparison (`comparison/{jvm,native,diff,logs}-<label>`). Run it with GraalVM's
 java (`$GRAALVM_HOME/bin/java tools/Cycle.java win1`): Maven builds with the JDK running the tool, and both runs then use
 the same JDK build. `--exact` builds with `--exact-reachability-metadata` and runs the executable with
 `-XX:MissingRegistrationReportingMode=Warn`, so that every reflection, JNI or resource access missing from the metadata
 is reported in the native `run.log`; the Snapshot tool prints how many `run.log` lines mention missing metadata
-(`Missing*RegistrationError`, `NoSuchFieldError`, `UnsatisfiedLinkError`...).
+(`Missing*RegistrationError`, `NoSuchFieldError`, `UnsatisfiedLinkError`...). `--skip-native-build` reuses the
+executable of an earlier cycle: the native build writes `cycle-native-build.properties` next to it, and with `--exact`
+the cycle stops (exit code 2) unless that executable was built by a cycle with `--exact` (it warns when it was built from
+other sources). `--require-focus` (unattended runs) fails the comparison when a page that needs the focus never got it,
+or when a window of the page never got it and its Robot input was skipped, even if both runs skipped it alike (see
+`tools/Compare.java`). `--jvm-only` compares two JVM runs instead of a JVM and a native run (a platform without
+native-image, such as Windows on arm64). `--categories` selects pages by category, as `-Dshowcase.categories`.
 
 Compare verdicts per image: `IDENTICAL`, `NOISE` (at most 2 levels per channel on less than 0.5 % of the pixels: the
 same differences appear between two JVM runs using different execution modes, JIT vs `-Xint`), `DIFFERENT`, `SIZE`,
@@ -122,8 +131,10 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   `reachability-metadata.json`, and one proxy class per listener interface of `EventHandler` (`@RegisterForProxy`);
 - registers, in the same `reachability-metadata.json`, the Foreign Function and Memory downcalls of `core.Foreground`
   (the Windows foreground check; native access is enabled with the `Enable-Native-Access` manifest attribute of the run
-  jar and `--enable-native-access=ALL-UNNAMED` for native builds, in `application.properties`, repeated in the `mac`
-  profile of `pom.xml`), the JDK internals that the macOS capture of the AWT components reads by reflection
+  jar, in `application.properties`, and for native builds with `--enable-native-access=ALL-UNNAMED` in the
+  `quarkus.native.additional-build-args-append` property of `pom.xml`, which the `mac` profile extends with its
+  `add-opens`: do not set that property in `application.properties`, whose value would replace both), the JDK
+  internals that the macOS capture of the AWT components reads by reflection
   (`java.awt.Component#peer`, `sun.lwawt.LWComponentPeer#getDelegate()`, with the `add-opens` of the `mac` profile),
   and the lookups that an `--exact-reachability-metadata` build needs for its own classes and resources: the types of
   its JavaBeans, the JavaBeans probes of its beans that do not exist (`BeanInfo`, `Customizer`,
@@ -131,8 +142,9 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   `Beans.instantiate` looks for (`.../pages/beans/*.ser`), the absent names its pages look up on purpose
   (`no.such.Bean`, `no.such.Type`, `no/such/*.ser`, missing images), the configuration files that Quarkus looks for,
   the URL stream handler providers that `URL.of` looks for, and the `provider()` method of the JDK locale data
-  provider (the classes of its Synth XML files are registered by quarkus-desktop-swing). The exact-mode cycles on
-  Windows, Linux and macOS report no other missing registration;
+  provider (the classes of its Synth XML files are registered by quarkus-desktop-swing, d6fd6de or later). The
+  exact-mode cycles on Windows and Linux report no other missing registration (on macOS too, with the earlier split,
+  where the showcase registered the types of its Synth painter itself);
 - enables the JavaBeans registration of the JDK Swing classes (`quarkus.desktop.swing.java-beans.jdk-classes=true`; the
   AWT one, `quarkus.desktop.awt.java-beans.jdk-classes`, is enabled by default): the beans pages introspect, encode and
   decode AWT and Swing components;
@@ -186,14 +198,18 @@ java tools/Cycle.java win-hidpi-gdi --hidpi --pipeline=gdi --skip-native-build -
 java tools/Cycle.java win-awt --awt-only --trace --require-focus
 java tools/Cycle.java win-exact --exact --require-focus
 java tools/Cycle.java win-exact-awt --awt-only --exact --require-focus
-java tools/Cycle.java win-exact-gdi --exact --pipeline=gdi --skip-native-build --require-focus   # also opengl, --hidpi
+java tools/Cycle.java win-exact-gdi --exact --pipeline=gdi --skip-native-build --require-focus   # after win-exact; also opengl, --hidpi
 ```
 
 - Default variant with Direct3D, GDI, OpenGL (WGL), and with GDI at 150 %: MATCH, every page identical except the
   EXPECTED differences of `overview-native-limits`; awt-only variant: MATCH. With OpenGL, the Robot capture of the popup
   menu of `awt-menus` differs by one level on a few hundred pixels now and then (NOISE).
-- `--exact`, in both variants, and the exact executable with GDI, OpenGL and at 150 %: no access missing from the
-  metadata, MATCH. The MetadataDiff of the traces lists nothing to register.
+- `--exact`, in both variants (Direct3D at 100 %): no access missing from the metadata, MATCH. The exact executable
+  with GDI, with OpenGL and at 150 % with GDI: no access missing from the metadata, and every page that does not need
+  the focus identical in both runs (run again with quarkus-desktop 72ad7aa on a locked desktop, where the pages that need
+  the focus skip their Robot input: the earlier runs on the live desktop were MISMATCH on the awt-menus focus flake,
+  before 005a0a4); at 150 % with Direct3D, the variance described below. The MetadataDiff of the traces lists nothing to
+  register.
 - Direct3D at 150 % (`--hidpi`): the run to run variance of the Metal gradients described with `--hidpi` above, in JVM
   runs as in native runs.
 - On a live desktop the pages that need the focus meet what the other applications do (see "Focus" in "Writing a
@@ -389,7 +405,7 @@ Each page is a class of `src/main/java/io/quarkiverse/desktop/showcase/pages/<gr
 feature surface of the JDK desktop modules: Overview, AWT, Java2D, Text & Fonts, Images & Color, Swing Components,
 Look & Feel, Data Transfer & Desktop, Printing, Accessibility & Beans, Sound.
 
-75 pages with 3767 checks in the default variant, 40 pages in the awt-only variant (the 8 macOS pages only report
+75 pages with 3768 checks in the default variant, 40 pages in the awt-only variant (the 8 macOS pages only report
 that they are not available on Windows and Linux). Classes are
 relative to `io.quarkiverse.desktop.showcase`. *Checks*: number of checks of a Windows JVM run (some pages have
 platform-specific checks). *Extras*: additional images (`<id>--<name>.png`). *focus*: the page needs the keyboard focus
@@ -399,7 +415,7 @@ and a native executable (reported as `EXPECTED`).
 | Category | Id | Title | Class | Checks | Extras | awt-only | Notes |
 |---|---|---|---|---:|---:|---|---|
 | Overview | `overview-environment` | Environment | `pages.overview.EnvironmentPage` | 82 | 0 | yes |  |
-| Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 28 | 0 | yes | runtime dependent |
+| Overview | `overview-native-limits` | Native limits | `pages.limits.NativeLimitsPage` | 29 | 0 | yes | runtime dependent |
 | AWT | `awt-components` | AWT components | `pages.awt.AwtComponentsPage` | 50 | 0 | yes |  |
 | AWT | `awt-menus` | AWT menus | `pages.awt.AwtMenusPage` | 25 | 4 | yes | focus |
 | AWT | `awt-layouts` | AWT layouts | `pages.awt.AwtLayoutsPage` | 43 | 0 | yes |  |
