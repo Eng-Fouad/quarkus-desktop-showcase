@@ -346,8 +346,11 @@ public final class RobotSession implements AutoCloseable {
      * loop holds the mouse (a first drag of a JVM run on a user's desktop stayed pending : no showcase window was
      * focused, the click was skipped), and in unattended runs ({@code -Dshowcase.activate=true} : the drag of the first
      * run of a CI runner stayed pending) whatever that window ; elsewhere only while a showcase window is focused
-     * ({@link #press}). Call it before {@link #releaseAll()} : the modifier keys of the drag stay pressed until the drop
-     * is done (the drag loop reads them when it handles the release of the button). At most 11 s.
+     * ({@link #press}). On Windows a key comes before the click : the drag loop (DoDragDrop) checks the state of the
+     * button when it gets keyboard input (QueryContinueDrag), and the pending drags of the CI runners ended when the next
+     * drag pressed its copy key (Ctrl), not with the click ; an inert key (F24) while the foreground window belongs to
+     * this process (or in unattended runs). Call it before {@link #releaseAll()} : the modifier keys of the drag stay
+     * pressed until the drop is done (the drag loop reads them when it handles the release of the button). At most 14 s.
      *
      * @return {@code true} when the drag ended
      */
@@ -361,6 +364,15 @@ public final class RobotSession implements AutoCloseable {
         move(new Point(target.x + 1, target.y + 1));
         if (Focus.await(ended, 3000)) {
             return true;
+        }
+        if (Platforms.isWindows() && (Focus.ACTIVATE || Boolean.TRUE.equals(Foreground.thisProcess()))) {
+            // the drag loop checks the button at the next keyboard input : a key that nothing uses
+            LOG.infof("drop at %d,%d not ended : F24 key for the drag loop", target.x, target.y);
+            robot.keyPress(KeyEvent.VK_F24);
+            robot.keyRelease(KeyEvent.VK_F24);
+            if (Focus.await(ended, 3000)) {
+                return true;
+            }
         }
         if (Focus.ACTIVATE) {
             // unattended runs (CI) : no user application to click into, and the drag loop may leave the foreground
