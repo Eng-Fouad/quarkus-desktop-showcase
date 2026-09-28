@@ -158,7 +158,7 @@ public class Cycle {
                 mavenArgs.stream().filter(a -> a.startsWith("-Dquarkus.platform.version=")).findFirst()
                         .ifPresent(a -> diffArgs.add("--quarkus-version=" + a.substring(a.indexOf('=') + 1)));
                 java(diff, diffArgs.toArray(String[]::new));
-                Files.readAllLines(diff).stream().filter(l -> l.startsWith("## ")).forEach(System.out::println);
+                Snapshot.lines(diff).stream().filter(l -> l.startsWith("## ")).forEach(System.out::println);
             }
         }
 
@@ -191,11 +191,11 @@ public class Cycle {
             Path log = logs.resolve("native-build.log");
             if (maven(log, offline, build) != 0) {
                 step("native build FAILED, see " + log);
-                Files.readAllLines(log).stream().filter(l -> l.contains("Fatal error") || l.startsWith("Error:")
+                Snapshot.lines(log).stream().filter(l -> l.contains("Fatal error") || l.startsWith("Error:")
                         || l.contains("[ERROR]")).limit(8).forEach(System.out::println);
                 System.exit(1);
             }
-            Files.readAllLines(log).stream().filter(l -> l.contains("Finished generating") || l.contains("Peak RSS"))
+            Snapshot.lines(log).stream().filter(l -> l.contains("Finished generating") || l.contains("Peak RSS"))
                     .forEach(System.out::println);
             writeNativeBuild(Snapshot.targetDir(snapshot.awtOnly), exact, nativeArgs, mavenArgs);
             if (Snapshot.isMac() && !macArtifacts(Snapshot.targetDir(snapshot.awtOnly), logs, snapshot.awtOnly)) {
@@ -229,7 +229,7 @@ public class Cycle {
             compare.add("--require-focus");
         }
         int compared = java(summary, compare.toArray(String[]::new));
-        List<String> result = Files.readAllLines(summary);
+        List<String> result = Snapshot.lines(summary);
         String verdict = result.stream().filter(l -> l.startsWith("MATCH") || l.startsWith("MISMATCH")).findFirst()
                 .orElse(result.isEmpty() ? "no comparison" : result.getFirst());
         System.out.println(verdict);
@@ -427,6 +427,9 @@ public class Cycle {
     static int java(Path output, String... args) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add(Snapshot.javaExecutable());
+        // the output file in UTF-8 on every platform (the check values of the pages are not ASCII)
+        command.add("-Dstdout.encoding=UTF-8");
+        command.add("-Dstderr.encoding=UTF-8");
         command.addAll(List.of(args));
         return new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start().waitFor();
     }

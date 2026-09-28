@@ -5,8 +5,9 @@ logs its failure and the script exits 0 ; the showcase reports the screen it got
 
 -Prepare : the largest display mode up to 3840x2160 (the runners start at 1024x768), the first-run windows of the
 windows-11-arm image closed (actions/runner-images#14069 : the privacy settings, OneDrive, "wsl --update"), no screen
-saver, no foreground lock time-out. -Minimize : every window minimized (the agent terminal may cover the title bar that
-core/Focus clicks), right before a cycle. -Screenshot : a screenshot of the whole screen.
+saver, no foreground lock time-out, Windows PowerShell started once (its slow first start, outside dt-clipboard).
+-Minimize : every window minimized (the agent terminal may cover the title bar that core/Focus clicks), right before a
+cycle. -Screenshot : a screenshot of the whole screen.
 #>
 param([switch] $Prepare, [switch] $Minimize, [string] $Screenshot)
 
@@ -193,6 +194,15 @@ if ($Prepare) {
     Step 'power' {
         powercfg /change monitor-timeout-ac 0
         powercfg /change standby-timeout-ac 0
+    }
+    Step 'Windows PowerShell' {
+        # the other application of dt-clipboard (showcase/desktop/foreign-clipboard.ps1) : its first start on a fresh
+        # runner, outside the timed page
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $time = Measure-Command {
+            & $ps -NoProfile -NonInteractive -Sta -Command 'Add-Type -AssemblyName System.Windows.Forms, System.Drawing' | Out-Host
+        }
+        "Windows PowerShell with Windows Forms : $([math]::Round($time.TotalSeconds, 1)) s"
     }
 }
 

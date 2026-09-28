@@ -56,6 +56,14 @@ public interface FeaturePage {
     }
 
     /**
+     * How long the snapshot runs wait for {@link #ready(Component)}, in seconds, for a page whose background work has
+     * time-outs of its own beyond {@code showcase.snapshot.ready-timeout-seconds} ; {@code 0} : that property.
+     */
+    default int readyTimeoutSeconds() {
+        return 0;
+    }
+
+    /**
      * Additional images to compare, for content outside the page component (dialogs, other windows, popups, rendered
      * print pages, ...). Invoked after {@link #ready(Component)} completed. Keys must be file-name safe.
      */

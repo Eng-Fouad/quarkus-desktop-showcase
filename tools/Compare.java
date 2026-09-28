@@ -221,13 +221,17 @@ public class Compare {
             List<?> errorsA = pa != null && pa.get("errors") instanceof List<?> l ? l : List.of();
             List<?> errorsB = pb != null && pb.get("errors") instanceof List<?> l ? l : List.of();
             boolean sameErrors = !errorsA.isEmpty() && String.valueOf(errorsA).equals(String.valueOf(errorsB));
+            // the errors first : they explain the check differences that follow (a page that was not ready has no
+            // checks), and the CI annotation only shows the first lines
+            List<String> errorNotes = new ArrayList<>();
             if (sameErrors) {
                 // not a difference between the two runs (e.g. a JDK bug or a missing device on this machine)
-                errorsA.forEach(e -> notes.add("same error in both: " + e));
+                errorsA.forEach(e -> errorNotes.add("same error in both: " + e));
             } else {
-                errorsA.forEach(e -> notes.add("error in A: " + e));
-                errorsB.forEach(e -> notes.add("error in B: " + e));
+                errorsA.forEach(e -> errorNotes.add("error in A: " + e));
+                errorsB.forEach(e -> errorNotes.add("error in B: " + e));
             }
+            notes.addAll(0, errorNotes);
             if (!notes.isEmpty()) {
                 if (notes.stream().anyMatch(n -> n.startsWith("error"))) {
                     errorPages++;

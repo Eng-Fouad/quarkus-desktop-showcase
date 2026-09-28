@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -279,8 +280,16 @@ public class Snapshot {
      * one of them), without the note that GraalVM prints once in that mode.
      */
     static long missingMetadata(Path log) throws IOException {
-        return Files.readAllLines(log).stream().filter(l -> !l.startsWith("Note: "))
+        return lines(log).stream().filter(l -> !l.startsWith("Note: "))
                 .filter(l -> MISSING_METADATA.matcher(l).find()).count();
+    }
+
+    /**
+     * The lines of a log written by another process : UTF-8, malformed bytes replaced (on Windows, a process writes its
+     * output in the ANSI code page unless told otherwise, and Files.readAllLines fails on the first non-ASCII byte).
+     */
+    static List<String> lines(Path log) throws IOException {
+        return new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines().toList();
     }
 
     /**

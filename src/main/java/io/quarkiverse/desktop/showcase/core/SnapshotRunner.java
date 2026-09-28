@@ -223,7 +223,7 @@ public class SnapshotRunner {
             ready = CompletableFuture.failedFuture(t);
         }
 
-        return Edt.timeout(ready, readyTimeoutSeconds * 1000L, "ready")
+        return Edt.timeout(ready, Math.max(readyTimeoutSeconds, page.readyTimeoutSeconds()) * 1000L, "ready")
                 .handle((v, error) -> {
                     if (error != null) {
                         errors.add("ready: " + Checks.describe(unwrap(error)));

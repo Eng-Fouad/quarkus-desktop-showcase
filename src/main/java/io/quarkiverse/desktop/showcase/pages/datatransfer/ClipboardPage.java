@@ -120,6 +120,15 @@ public class ClipboardPage implements FeaturePage {
                 foreignView);
     }
 
+    /**
+     * The showcase lock (up to 25 s) and the other process (up to 25 s : the first start of Windows PowerShell with
+     * Windows Forms is slow on a fresh machine) on top of the round trips.
+     */
+    @Override
+    public int readyTimeoutSeconds() {
+        return 75;
+    }
+
     @Override
     public CompletionStage<?> ready(Component content) {
         ClipboardSession s = session;
