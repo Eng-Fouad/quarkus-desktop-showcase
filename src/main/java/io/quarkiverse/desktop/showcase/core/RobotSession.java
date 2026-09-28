@@ -341,13 +341,13 @@ public final class RobotSession implements AutoCloseable {
      * seen at 150 %). The drag loop of the operating system may miss the release until the next input (Windows, JVM
      * runs : the drag ended when the next drag pressed the button). When the drag started ({@code started} : no input
      * into the page otherwise), a small move over the drop target, then a click on it, end the loop (the drop then
-     * fails or succeeds, the caller checks). The click is made only while a showcase window is focused ({@link #press})
-     * and, on Windows, only where the window under the target belongs to this process
-     * ({@link Foreground#thisProcessAt}), except in unattended runs ({@code -Dshowcase.activate=true} : the drag of the
-     * first run of a CI runner stayed pending, the click would have been skipped). Call it before {@link #releaseAll()} :
-     * the modifier keys of the drag stay
-     * pressed until the drop is done (the drag loop reads them when it handles the release of the button). At most
-     * 11 s.
+     * fails or succeeds, the caller checks). On Windows the click is made only where the window under the target
+     * belongs to this process ({@link Foreground#thisProcessAt}), whatever the focus that Java reports while the drag
+     * loop holds the mouse (a first drag of a JVM run on a user's desktop stayed pending : no showcase window was
+     * focused, the click was skipped), and in unattended runs ({@code -Dshowcase.activate=true} : the drag of the first
+     * run of a CI runner stayed pending) whatever that window ; elsewhere only while a showcase window is focused
+     * ({@link #press}). Call it before {@link #releaseAll()} : the modifier keys of the drag stay pressed until the drop
+     * is done (the drag loop reads them when it handles the release of the button). At most 11 s.
      *
      * @return {@code true} when the drag ended
      */
@@ -371,12 +371,23 @@ public final class RobotSession implements AutoCloseable {
             robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
             return Focus.await(ended, 4000);
         }
-        if (Boolean.FALSE.equals(Foreground.thisProcessAt(target))) {
+        Boolean ours = Foreground.thisProcessAt(target);
+        if (Boolean.FALSE.equals(ours)) {
             LOG.infof("drop at %d,%d not ended : no click, the window under the target belongs to another process",
                     target.x, target.y);
             return false;
         }
-        click(InputEvent.BUTTON1_DOWN_MASK);
+        if (Boolean.TRUE.equals(ours)) {
+            // Windows : the click lands in the showcase window under the target, whatever the focus that Java reports
+            // while the drag loop holds the mouse (no showcase window focused : press would skip the click)
+            LOG.infof("drop at %d,%d not ended : click on the showcase window under the target", target.x, target.y);
+            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+            return Focus.await(ended, 4000);
+        }
+        if (!click(InputEvent.BUTTON1_DOWN_MASK)) {
+            LOG.infof("drop at %d,%d not ended : no click, no showcase window focused", target.x, target.y);
+        }
         return Focus.await(ended, 4000);
     }
 
