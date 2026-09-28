@@ -74,7 +74,10 @@ java tools/Compare.java comparison/jvm comparison/native comparison/diff   # sum
   executable defaults to the locale of the build machine; AWT heavyweight components render correctly with `printAll`
   at scale 1 only).
 - `--hidpi` keeps the real UI scale. Forcing the scale to 1 hides a DPI unaware native executable: compare a `--hidpi`
-  JVM run with a `--hidpi` native run (report keys `defaultTransform` and `screenResolution`).
+  JVM run with a `--hidpi` native run (report keys `defaultTransform` and `screenResolution`). On Windows with Direct3D
+  at a fractional scale (150 %), a few hundred pixels of the Metal gradients (the edges of scroll bar thumbs, list,
+  popup and menu backgrounds, in a few Swing images) differ from one run to the next, between two JVM runs as between
+  two native runs: compare the real scale with `--hidpi --pipeline=gdi` too, where every page is identical.
 - `--pipeline` selects another Java2D pipeline than the default one of the platform: `gdi` (`-Dsun.java2d.d3d=false`,
   GDI instead of Direct3D on Windows), `opengl` (`-Dsun.java2d.opengl=true`, WGL on Windows, GLX on Linux), `x11`
   (`-Dsun.java2d.xrender=false` on Linux). Compare runs of the same pipeline (report key `pipeline`).
@@ -166,6 +169,37 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   classes left initialized at build time (not in the run time initialization lists of quarkus-desktop and quarkus-awt)
   whose static initializer reaches native code, library loading, threads, native memory, NIO channels, the toolkit,
   system properties or resource bundles (JDK class file API, no library needed).
+
+## Results on Windows (September 2026)
+
+Windows 11 x64 (10.0.26200), one 3840x2160 display at 150 %, Oracle GraalVM for JDK 25 (25.0.0) for the native builds
+and the JVM runs, the cycles run on a user's desktop (a browser and other applications open), with `--require-focus` and
+without `-Dshowcase.activate=true`:
+
+```bash
+java tools/Cycle.java win --trace --require-focus                                  # Direct3D, scale 1
+java tools/Cycle.java win-gdi --pipeline=gdi --skip-native-build --require-focus
+java tools/Cycle.java win-ogl --pipeline=opengl --skip-native-build --require-focus
+java tools/Cycle.java win-hidpi --hidpi --skip-native-build --require-focus
+java tools/Cycle.java win-hidpi-gdi --hidpi --pipeline=gdi --skip-native-build --require-focus
+java tools/Cycle.java win-awt --awt-only --trace --require-focus
+java tools/Cycle.java win-exact --exact --require-focus
+java tools/Cycle.java win-exact-awt --awt-only --exact --require-focus
+java tools/Cycle.java win-exact-gdi --exact --pipeline=gdi --skip-native-build --require-focus   # also opengl, --hidpi
+```
+
+- Default variant with Direct3D, GDI, OpenGL (WGL), and with GDI at 150 %: MATCH, every page identical except the
+  EXPECTED differences of `overview-native-limits`; awt-only variant: MATCH. With OpenGL, the Robot capture of the popup
+  menu of `awt-menus` differs by one level on a few hundred pixels now and then (NOISE).
+- `--exact`, in both variants, and the exact executable with GDI, OpenGL and at 150 %: no access missing from the
+  metadata, MATCH. The MetadataDiff of the traces lists nothing to register.
+- Direct3D at 150 % (`--hidpi`): the run to run variance of the Metal gradients described with `--hidpi` above, in JVM
+  runs as in native runs.
+- On a live desktop the pages that need the focus meet what the other applications do (see "Focus" in "Writing a
+  page"): an application in front covers the showcase windows (the window is raised before its title bar is clicked),
+  the thumbnails of the taskbar under the user's pointer cover a screen capture (`RobotSession.awaitUncovered`), the
+  Windows drag loop misses the release of a button (`RobotSession.finishDrop`). A failure of such a page that does not
+  come back on a rerun of the same executables is not a native gap: do not use the machine while a cycle runs.
 
 ## Linux in Docker
 
