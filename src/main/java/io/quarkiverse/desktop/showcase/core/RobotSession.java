@@ -476,6 +476,50 @@ public final class RobotSession implements AutoCloseable {
     }
 
     /**
+     * Windows : waits up to {@code timeoutMillis} until no window of another process covers {@code screen}, an area
+     * that only showcase windows cover (a grid of points checked with {@link Foreground#thisProcessAt}) : a window of
+     * the user's desktop shown above them for a moment (the thumbnails that the taskbar shows under the pointer, a
+     * notification) would be in a screen capture of the area. Logged with {@link #logRetry} while covered. Elsewhere
+     * (the window under a point is not known) {@code true} at once.
+     *
+     * @return {@code false} when the area is still covered
+     */
+    public boolean awaitUncovered(String action, Rectangle screen, long timeoutMillis) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        Point covered = coveredPoint(screen);
+        if (covered == null) {
+            return true;
+        }
+        logRetry(action, 1, "covered by another process at " + covered.x + "," + covered.y);
+        while (covered != null) {
+            if (System.nanoTime() - deadline > 0) {
+                logRetry(action, 2, "still covered by another process at " + covered.x + "," + covered.y);
+                return false;
+            }
+            Focus.sleep(250);
+            covered = coveredPoint(screen);
+        }
+        return true;
+    }
+
+    /**
+     * A point of a 5 x 5 grid over {@code screen} where the window belongs to another process, {@code null} when there
+     * is none or it is not known (not Windows).
+     */
+    private static Point coveredPoint(Rectangle screen) {
+        for (int row = 0; row < 5; row++) {
+            for (int column = 0; column < 5; column++) {
+                Point p = new Point(screen.x + screen.width * (2 * column + 1) / 10,
+                        screen.y + screen.height * (2 * row + 1) / 10);
+                if (Boolean.FALSE.equals(Foreground.thisProcessAt(p))) {
+                    return p;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether {@code image} is a screen capture of {@link #capture}, as captured (not a processed copy) : its colors come
      * from the screen, through the color profile of the display on macOS, one or two levels apart from one run to the
      * next. {@link SnapshotRunner} lists such snapshots in the report ({@code captures}), and the comparison tool

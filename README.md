@@ -320,7 +320,9 @@ public class ShapesPage implements FeaturePage {
     `RobotSession.waitForPixel` until a new window is painted (X11 shows its unpainted native background until then),
     `RobotSession.raiseUntil` brings a focused but covered window back to the front while a probe pixel shows it covered
     (without a window manager always-on-top windows keep their mapping order; a restacking window manager may cover an
-    override-redirect `POPUP` window), `Edt.untilStable` for bounds that a window manager configures in several steps;
+    override-redirect `POPUP` window), `Edt.untilStable` for bounds that a window manager configures in several steps,
+    `RobotSession.awaitUncovered` before a screen capture of an area that only showcase windows cover (Windows: a
+    window of the desktop above them for a moment, such as the thumbnails of the taskbar under the user's pointer);
   - on macOS Robot needs the Accessibility (input) and Screen Recording (pixels) permissions (TCC) of the application
     that started the showcase (environment keys `macos.tcc.input` and `macos.tcc.screenCapture`, probed with
     `-Dshowcase.robot=true`: two always-on-top windows read with a tolerance for 1.5 s, a pointer move tried three

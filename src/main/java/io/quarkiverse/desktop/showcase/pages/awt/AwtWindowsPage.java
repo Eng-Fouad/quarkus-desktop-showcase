@@ -570,6 +570,9 @@ public class AwtWindowsPage implements FeaturePage {
                                 robot.raiseUntil(action, popup, popupCenter, rgb -> rgb == POPUP_COLOR, 5, 300);
                             }
                         }
+                        // Windows : the backdrop and the gallery are always on top, but a window of the desktop may
+                        // still be above them for a moment (the thumbnails of the taskbar under the user's pointer)
+                        robot.awaitUncovered("awt-windows gallery capture", area, 5000);
                         return robot.capture(area);
                     }
                 }))
