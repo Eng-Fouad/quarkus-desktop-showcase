@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.BooleanSupplier;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -412,6 +413,10 @@ public class OptionPaneDialogsPage implements FeaturePage {
                             () -> s.desktop.getSelectedFrame().getTitle()));
                     answers(s, checks);
                     showOptionDialog(s, owner, checks);
+                })
+                .thenCompose(v -> laidOut(s.shownOption))
+                .thenAccept(v -> {
+                    answerOptionDialog(s, checks);
                     showWindow(s, checks);
                     s.modal = modalDialog(owner);
                     checks.add(Checks.expect("modal: modal, modality type, focusable window state",
@@ -499,8 +504,8 @@ public class OptionPaneDialogsPage implements FeaturePage {
     }
 
     /**
-     * A modeless option pane dialog shown outside the main window, answered with doClick : the option pane hides its
-     * dialog once a value is set.
+     * A modeless option pane dialog shown outside the main window, answered with doClick once laid out
+     * ({@link #answerOptionDialog}) : the option pane hides its dialog once a value is set.
      */
     private static void showOptionDialog(State s, Window owner, List<Check> checks) {
         s.shownPane = new JOptionPane("Replace the file?", JOptionPane.WARNING_MESSAGE, JOptionPane.YES_NO_CANCEL_OPTION);
@@ -514,6 +519,28 @@ public class OptionPaneDialogsPage implements FeaturePage {
                 () -> dialog.isShowing() + " " + dialog.isModal() + " " + dialog.isResizable()));
         checks.add(Checks.expect("option dialog: title, owner", "Modeless option pane true",
                 () -> dialog.getTitle() + " " + (dialog.getOwner() == owner)));
+    }
+
+    /**
+     * Completes (on the EDT) once the content pane of {@code dialog} has its preferred size, the size that pack gave it :
+     * at once (in the same EDT task) on Windows and macOS, which know the insets of a window when its peer is created.
+     * On X11 the new peer of a decorated dialog asks the window manager for its frame extents
+     * (_NET_REQUEST_FRAME_EXTENTS) and, the dialog not being resizable, drops the insets it guessed (25,5,5,5) : the pack
+     * of createDialog reads the frame extents (_NET_FRAME_EXTENTS) a few tenths of a millisecond later. When the window
+     * manager answered first (openbox needs about 0.7 ms, a loaded machine delays pack), the dialog is laid out with the
+     * frame extents (18,1,1,1 under openbox) but sized with the guessed insets : its content pane is larger than its
+     * preferred size (270x101 instead of 262x90) until the window manager has framed the shown dialog
+     * (ReparentNotify), when the peer sizes it with the frame extents. After 5 s the size is read as it is.
+     */
+    private static CompletionStage<Void> laidOut(JDialog dialog) {
+        Component content = dialog.getContentPane();
+        BooleanSupplier packed = () -> content.getSize().equals(content.getPreferredSize());
+        return packed.getAsBoolean() ? CompletableFuture.completedFuture(null)
+                : Edt.until(packed, 5_000, "option dialog laid out").handle((v, error) -> null);
+    }
+
+    private static void answerOptionDialog(State s, List<Check> checks) {
+        JDialog dialog = s.shownOption;
         checks.add(Checks.info("option dialog: content size", () -> size(dialog.getContentPane().getSize())));
         s.extras.put("option-dialog", Snapshots.render(dialog.getRootPane()));
         checks.add(Checks.expect("option dialog: No clicked, value, dialog hidden", "1 false", () -> {
