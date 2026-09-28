@@ -181,13 +181,13 @@ jobs:
           cache-to: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && format('type=gha,mode=min,scope=showcase-linux-{0}', runner.arch) || '' }}
 
       # docker run, not a job container : the entry point of the image starts the X server, the window manager and the
-      # system tray. quarkus-desktop's own CI runs its tests and checks its format : only installed here (without the
-      # format plugins, whose downloads are not needed).
+      # system tray. quarkus-desktop's own CI runs its tests and checks its format : only installed here, without
+      # running the format plugins (-Dformat.skip, the property of quarkiverse-parent : -Dno-format validates the format).
       - name: Install quarkus-desktop
         id: install
         run: |
           docker run --rm --init -v "$PWD/quarkus-desktop":/quarkus-desktop -w /quarkus-desktop \
-            -v "$HOME/.m2":/root/.m2 "$IMAGE" ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee install.log
+            -v "$HOME/.m2":/root/.m2 "$IMAGE" ./mvnw -B -ntp install -DskipTests -Dformat.skip 2>&1 | tee install.log
 
       # Cycle.java exits 1 when a run fails, when --exact finds accesses missing from the metadata or when the runs do
       # not match ; --require-focus : a page that never got the focus fails (its Robot input was skipped). The step
@@ -331,7 +331,7 @@ jobs:
       - name: Install quarkus-desktop
         id: install
         working-directory: quarkus-desktop
-        run: ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee ../install.log
+        run: ./mvnw -B -ntp install -DskipTests -Dformat.skip 2>&1 | tee ../install.log
 
       # every window minimized again right before the cycle (the first-run windows of the image, the agent terminal)
       - name: Minimize the windows
@@ -588,7 +588,7 @@ jobs:
       - name: Install quarkus-desktop
         id: install
         working-directory: quarkus-desktop
-        run: ./mvnw -B -ntp install -DskipTests -Dno-format -Dformatter.skip -Dimpsort.skip 2>&1 | tee ../install.log
+        run: ./mvnw -B -ntp install -DskipTests -Dformat.skip 2>&1 | tee ../install.log
 
       # 7 GB of memory on the runner : native-image gets 5g (Cycle.java gives it 8g otherwise).
       # -Dshowcase.robot=true : the macos.tcc.* keys of report.json. -Dshowcase.activate=true : core/Focus activates the
