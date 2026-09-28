@@ -29,6 +29,9 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowFocusListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyVetoException;
 import java.beans.VetoableChangeListener;
@@ -39,6 +42,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import jakarta.inject.Singleton;
@@ -349,6 +353,15 @@ public class AwtFocusPage implements FeaturePage {
 
     // ------------------------------------------------------------------------------------------------------ ready
 
+    /**
+     * The veto and the Robot sequences are each tried up to {@link #ATTEMPTS} times, the page window focused again before
+     * each retry (a few seconds when another application has the foreground).
+     */
+    @Override
+    public int readyTimeoutSeconds() {
+        return 60;
+    }
+
     @Override
     public CompletionStage<?> ready(Component content) {
         Components comps = c;
@@ -376,6 +389,7 @@ public class AwtFocusPage implements FeaturePage {
         java.util.List<String> dispatched = Collections.synchronizedList(new ArrayList<>());
         java.util.List<String> postProcessed = Collections.synchronizedList(new ArrayList<>());
         java.util.List<String> canvasKeys = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger vetoes = new AtomicInteger();
         dispatcher = e -> {
             if (e.getKeyCode() == KeyEvent.VK_F7 && e.getComponent() == comps.canvas) {
                 dispatched.add(AwtSupport.idName(e));
@@ -391,6 +405,7 @@ public class AwtFocusPage implements FeaturePage {
         };
         veto = (PropertyChangeEvent event) -> {
             if ("focusOwner".equals(event.getPropertyName()) && event.getNewValue() == comps.in2) {
+                vetoes.incrementAndGet();
                 throw new PropertyVetoException("in2 is vetoed", event);
             }
         };
@@ -437,19 +452,7 @@ public class AwtFocusPage implements FeaturePage {
                 .thenAccept(v -> checks.add(Checks.expect("upFocusCycle(in3) : current focus cycle root", "root",
                         () -> name(kfm.getCurrentFocusCycleRoot()))))
                 // veto
-                .thenCompose(v -> focus(comps.in1, () -> comps.in1.requestFocusInWindow()))
-                .thenCompose(v -> {
-                    kfm.addVetoableChangeListener(veto);
-                    boolean accepted = comps.in2.requestFocusInWindow();
-                    return Edt.delay(300).thenApply(d -> accepted);
-                })
-                .thenAccept(accepted -> {
-                    kfm.removeVetoableChangeListener(veto);
-                    checks.add(Checks.expect("VetoableChangeListener vetoes focusOwner = in2 : focus owner", "in1",
-                            () -> name(kfm.getFocusOwner())));
-                    checks.add(Check.info("requestFocusInWindow(in2) result while vetoed", accepted));
-                    comps.log.clear();
-                })
+                .thenCompose(v -> vetoFocus(comps, checks, vetoes, 1))
                 // Robot : Tab, Shift+Tab, the custom traversal key, keys for the dispatcher and the post processor
                 .thenCompose(v -> robotTabs(comps, checks, 1))
                 .thenCompose(v -> robotKeys(comps, checks, dispatched, postProcessed, canvasKeys, 1))
@@ -467,6 +470,56 @@ public class AwtFocusPage implements FeaturePage {
                     Snapshots.layout(logHolder);
                 });
         return chain;
+    }
+
+    /**
+     * The {@link VetoableChangeListener} vetoes the focus change from in1 to in2 : DefaultKeyboardFocusManager rolls it
+     * back (restoreFocus, cause ROLLBACK) to in1, the component that lost the focus. Again (at most {@link #ATTEMPTS}
+     * times, the page window focused again and in1 focused first) when the page window lost the focus meanwhile : another
+     * application may take the foreground at any time, the focus owner is then null (a temporary FOCUS_LOST of in1) until
+     * the window is activated again, which nothing else in this step does.
+     */
+    private CompletionStage<Void> vetoFocus(Components comps, java.util.List<Check> checks, AtomicInteger vetoes,
+            int attempt) {
+        KeyboardFocusManager kfm = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+        Window window = RobotSession.windowOf(comps.in1);
+        int[] acquired = { 0 };
+        boolean[] lost = { false };
+        WindowFocusListener lostListener = new WindowAdapter() {
+            @Override
+            public void windowLostFocus(WindowEvent e) {
+                lost[0] = true;
+            }
+        };
+        return Focus.acquire(window).thenCompose(n -> {
+            acquired[0] = n;
+            window.addWindowFocusListener(lostListener);
+            return focus(comps.in1, () -> comps.in1.requestFocusInWindow());
+        }).thenCompose(v -> {
+            vetoes.set(0);
+            kfm.addVetoableChangeListener(veto);
+            boolean accepted = comps.in2.requestFocusInWindow();
+            // the veto, then the rollback : at least 300 ms, until a focus owner is back after the veto (at most 2 s more)
+            return Edt.delay(300)
+                    .thenCompose(d -> Edt.until(() -> lost[0] || vetoes.get() > 0 && kfm.getFocusOwner() != null, 2000,
+                            "focus rolled back").handle((r, e) -> null))
+                    .thenCompose(r -> Edt.rounds(2))
+                    .thenApply(r -> accepted);
+        }).thenCompose(accepted -> {
+            kfm.removeVetoableChangeListener(veto);
+            window.removeWindowFocusListener(lostListener);
+            if ((lost[0] || !window.isFocused()) && acquired[0] > 0 && attempt < ATTEMPTS) {
+                RobotSession.logRetry("awt-focus veto of in2", attempt, "the page window lost the focus ; focus owner "
+                        + name(kfm.getFocusOwner()) + ", vetoes " + vetoes.get());
+                return vetoFocus(comps, checks, vetoes, attempt + 1);
+            }
+            checks.add(Check.attempts("VetoableChangeListener vetoes focusOwner = in2", attempt));
+            checks.add(Checks.expect("VetoableChangeListener vetoes focusOwner = in2 : focus owner", "in1",
+                    () -> name(kfm.getFocusOwner())));
+            checks.add(Check.info("requestFocusInWindow(in2) result while vetoed", accepted));
+            comps.log.clear();
+            return CompletableFuture.completedFuture(null);
+        });
     }
 
     /**
@@ -510,7 +563,7 @@ public class AwtFocusPage implements FeaturePage {
                 : Check.info("back to the page window : FOCUS_GAINED", "skipped: the page window was not focused again")));
     }
 
-    /** Attempts of each Robot sequence : another application may take the foreground at any time. */
+    /** Attempts of the veto and of each Robot sequence : another application may take the foreground at any time. */
     private static final int ATTEMPTS = 3;
     private static final String EXPECTED_TABS = "b1 UNKNOWN, t1 TRAVERSAL_FORWARD, l1 TRAVERSAL_FORWARD, "
             + "t1 TRAVERSAL_BACKWARD";
