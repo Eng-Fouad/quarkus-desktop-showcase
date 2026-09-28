@@ -295,8 +295,9 @@ missing from the metadata, or when the runs do not match. `.github/scripts/cycle
 differs, the screen, the pipeline and the macOS privacy permissions of the runs to the summary of the run and as an
 annotation of the job; the logs, reports and metadata are artifacts (with the images of both runs when the job failed).
 `.github/scripts/windows-desktop.ps1` and `macos-desktop.sh` prepare and describe the runner desktops (display mode,
-first-run windows, screenshots before and after the cycle). The platforms that never ran on GitHub are non-blocking
-(`blocking` in the plan table) until they are reliably green.
+first-run windows, screenshots before and after the cycle). A variant is non-blocking (`blocking` in the plan table)
+until it is reliably green: blocking today are Linux-arm64 and the variants of every push on Windows-x64 and
+Windows-arm64; Linux-x64, the nightly variants on Windows, and macOS-arm64 (a Quarkus pull request) are not.
 
 - `.github/workflows/showcase.yml` (this repository): on every push and pull request, every night (the builder image,
   the runner images and quarkus-desktop change without the showcase), and manually (another quarkus-desktop commit,
