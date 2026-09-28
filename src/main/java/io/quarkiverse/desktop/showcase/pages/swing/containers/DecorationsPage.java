@@ -442,6 +442,8 @@ public class DecorationsPage implements FeaturePage {
                 String name = new String[] { "light", "medium", "heavy" }[i];
                 manager.setLightWeightPopupEnabled(button.lightWeight);
                 button.lastTip = null;
+                // X11 : the heavy weight tip reuses a hidden popup window, created again (see disposeHiddenPopupWindows)
+                Snapshots.disposeHiddenPopupWindows(window);
                 SwingKit.key(button, InputEvent.CTRL_DOWN_MASK, KeyEvent.VK_F1, KeyEvent.CHAR_UNDEFINED);
                 JToolTip tip = button.lastTip;
                 if (tip == null || !tip.isShowing()) {

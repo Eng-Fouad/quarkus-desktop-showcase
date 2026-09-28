@@ -11,6 +11,7 @@ import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Robot;
+import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.awt.image.MultiResolutionImage;
 import java.util.function.Consumer;
@@ -129,6 +130,28 @@ public final class Snapshots {
             root.validate();
         } else {
             layoutDetached(component);
+        }
+    }
+
+    /**
+     * X11 : disposes the hidden heavy weight popup windows of {@code owner}, before a popup whose layout is read or
+     * rendered is shown. {@code PopupFactory} keeps the window of a hidden heavy weight popup for the next one, which
+     * moves that X window to its location at 1 x 1 ({@code Popup.reset}) and then packs it : two configure requests,
+     * and the peer of the window applies the size of each ConfigureNotify event on the toolkit thread, also after a
+     * later request. The 1 x 1 event came after the pack most of the time, sometimes while {@code Window.show} laid the
+     * popup out (a popup rendered 1 x 1 under CPU load), and a layout for the COMPONENT_RESIZED that it posts may see
+     * it too. A disposed window is created again at its location and then packed : a single configure request. Windows
+     * and macOS keep their windows.
+     */
+    public static void disposeHiddenPopupWindows(Window owner) {
+        if (owner == null || !Platforms.isLinux()) {
+            return;
+        }
+        for (Window window : owner.getOwnedWindows()) {
+            if (!window.isVisible() && window.isDisplayable()
+                    && window.getClass().getName().equals("javax.swing.Popup$HeavyWeightWindow")) {
+                window.dispose();
+            }
         }
     }
 

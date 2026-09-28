@@ -413,6 +413,8 @@ public class MenusPopupsPage implements FeaturePage {
         // --- the menu bar path File > Open Recent > notes.md
         s.menuEvents.add("-- open");
         MenuElement[] path = { s.bar, s.file, s.file.getPopupMenu(), s.recent, s.recent.getPopupMenu(), s.recentSecond };
+        // X11 : the heavy weight popups (every popup of the AWT main window) get new windows (disposeHiddenPopupWindows)
+        Snapshots.disposeHiddenPopupWindows(window);
         msm.setSelectedPath(path);
         checks.add(Checks.expect("menu bar path: selected path", "JMenuBar File JPopupMenu Open Recent JPopupMenu notes.md",
                 () -> pathNames(msm.getSelectedPath())));
@@ -469,6 +471,7 @@ public class MenusPopupsPage implements FeaturePage {
     private static void popupMenu(State s, Window window, String name, JPopupMenu popup, JComponent anchor, int x,
             String expectedKind) {
         List<Check> checks = s.popupChecks;
+        Snapshots.disposeHiddenPopupWindows(window);
         popup.show(anchor, x, anchor.getHeight());
         Check kind = Check.info(name + ": weight, window", SwingKit.popupKind(popup, window) + " "
                 + SwingKit.windowClass(popup));
@@ -494,6 +497,8 @@ public class MenusPopupsPage implements FeaturePage {
     private static void factoryPopup(State s, Window window, String name, JComponent anchor, JComponent contents,
             boolean forceHeavy, String expectedKind) {
         List<Check> checks = s.popupChecks;
+        // before getPopup : it moves the window that a heavy weight popup reuses (see disposeHiddenPopupWindows)
+        Snapshots.disposeHiddenPopupWindows(window);
         Point p = anchor.getLocationOnScreen();
         Popup popup = new ForcingPopupFactory().popup(anchor, contents, p.x, p.y + anchor.getHeight(), forceHeavy);
         popup.show();

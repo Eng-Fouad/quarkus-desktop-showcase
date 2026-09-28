@@ -209,6 +209,9 @@ public class ListsCombosPage implements FeaturePage {
     }
 
     private CompletionStage<Void> shownPopup(String name, JComboBox<String> combo) {
+        // X11 : a heavy weight popup reusing the window of an earlier one (the light one of the AWT main window) could be
+        // laid out at 1 x 1 by the COMPONENT_RESIZED of a late ConfigureNotify (see disposeHiddenPopupWindows)
+        Snapshots.disposeHiddenPopupWindows(javax.swing.SwingUtilities.getWindowAncestor(combo));
         combo.setPopupVisible(true);
         return Edt.rounds(3).thenAccept(v -> {
             BasicComboPopup popup = (BasicComboPopup) combo.getUI().getAccessibleChild(combo, 0);

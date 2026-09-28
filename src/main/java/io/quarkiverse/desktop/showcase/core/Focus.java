@@ -46,8 +46,8 @@ import org.jboss.logging.Logger;
  * later attempts click the title bar on macOS too (a mouse click activates the application), without the check of the
  * window under the point that only Windows can make.
  * <p>
- * A window is also placed asynchronously : {@link #awaitPlaced} waits until its screen location is the requested one
- * (X11 confirms a location after the focus, sometimes) before Robot coordinates are computed from it.
+ * A window is also placed asynchronously : {@link #awaitPlaced} waits until its screen location, as AWT knows it, is the
+ * requested one (X11 reports a location after the focus, sometimes) before Robot coordinates are computed from it.
  */
 public final class Focus {
 
@@ -82,9 +82,20 @@ public final class Focus {
 
     /**
      * Completes (on the EDT) with {@code true} once {@code window} is showing less than {@code tolerance} pixels away
-     * from {@code expected} on screen, {@code false} after {@code timeoutMillis}. On X11 the location of a window is
-     * known once the X server confirmed it (ConfigureNotify), which may come after the focus (a bare X server) : Robot
-     * coordinates computed from an older location land elsewhere. The tolerance covers the frame of a window manager.
+     * from {@code expected} on screen, {@code false} after {@code timeoutMillis}. The tolerance covers the frame of a
+     * window manager.
+     * <p>
+     * X11 : {@code getLocationOnScreen} never asks the X server, it returns the location that the peer keeps, which the
+     * ConfigureNotify events update on the toolkit thread (X11 sends one for each configure request, a window manager
+     * delays the requests of the windows it manages). A Frame or a Dialog reports its Java location until the window
+     * manager has reparented it and sent an event, then the location of the events handled since : a move requested
+     * while it is shown is seen once the window manager reported it. Under a window manager, the events of a decorated
+     * one handled before the reparenting are dropped (an undecorated one applies those handled once it is shown :
+     * openbox reports another location while it maps it) ; without window manager every event is applied. A
+     * java.awt.Window (JWindow, heavy weight popups) reports the location it requested last and applies every event,
+     * also one that reports an earlier request. Such an event, handled after this wait passed, takes the location back
+     * until the next one : this wait cannot tell it apart. A window whose location must not change once placed is
+     * located before its peer is created (setLocation before pack), so that no event reports another location.
      */
     public static CompletionStage<Boolean> awaitPlaced(Window window, Point expected, int tolerance, long timeoutMillis) {
         return Edt.until(() -> window.isShowing() && window.getLocationOnScreen().distance(expected) < tolerance,

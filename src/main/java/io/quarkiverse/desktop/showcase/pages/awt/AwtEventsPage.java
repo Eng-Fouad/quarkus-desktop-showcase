@@ -806,8 +806,10 @@ public class AwtEventsPage implements FeaturePage {
                     return Edt.until(target::isFocusOwner, 3000, "target canvas focused")
                             .handle((v, error) -> error == null ? attempts : 0);
                 })
-                // X11 without window manager : the location of the frame is known once the X server confirmed it
-                // (ConfigureNotify), which may come after the focus ; the origin of the Robot coordinates is read then
+                // X11 without window manager : the ConfigureNotify of pack (the frame at the location of a new window)
+                // takes the location of the frame back there until the one of setLocation, which may come after the
+                // focus ; the origin of the Robot coordinates is read once it is back (see Focus.awaitPlaced). Under a
+                // window manager, both are dropped (handled before it reparented the frame, which is not moved then)
                 .thenCompose(attempts -> Focus.awaitPlaced(frame, area.getLocation(), 64, 2000)
                         .thenApply(placed -> attempts))
                 .thenCompose(focused -> {
