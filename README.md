@@ -150,7 +150,8 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   `io.quarkiverse.desktop.swing.deployment.SwingClassesAndResources` from the deployment jars installed in `~/.m2` (or
   in another local Maven repository given with `--repository`, e.g. one where a branch of quarkus-desktop was
   installed with `-Dmaven.repo.local`),
-  understands package entries, `fqcn#member` entries and the classes registered with their public members
+  understands package entries, `fqcn#member` entries, the classes registered with their fields only
+  (`REFLECTIVE_FIELD_CLASSES`) and the classes registered with their public members
   (`REFLECTIVE_PUBLIC_MEMBERS`, and `JAVA_BEANS_CLASSES` unless `--no-java-beans`: the showcase enables the
   `java-beans.jdk-classes` properties), the lists of `--exact-reachability-metadata` builds (`REFLECTIVE_TYPES`,
   `NEGATIVE_CLASS_LOOKUPS`, `METHOD_LOOKUPS`, `RESOURCE_LOOKUPS`), the constants of the extension code (`*SERIALIZABLE*`

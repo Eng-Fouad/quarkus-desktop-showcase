@@ -74,7 +74,8 @@ public class MetadataDiff {
     /** A method entry of the lists : {@code fqcn#name(paramType,...)}. */
     static final Pattern METHOD_ENTRY = Pattern.compile("([^#]+)#([^(]+)\\((.*)\\)");
     static final List<String> KINDS = List.of("RUNTIME_INITIALIZED_PACKAGES", "RUNTIME_INITIALIZED_CLASSES",
-            "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS", "REFLECTIVE_FIELDS",
+            "REFLECTIVE_CLASSES", "REFLECTIVE_FIELD_CLASSES", "REFLECTIVE_CONSTRUCTORS", "REFLECTIVE_METHODS",
+            "REFLECTIVE_FIELDS",
             "JNI_RUNTIME_ACCESS_CLASSES", "JNI_RUNTIME_ACCESS_METHODS", "JNI_RUNTIME_ACCESS_FIELDS", "RESOURCE_BUNDLES",
             "RESOURCE_GLOBS", "SERVICE_PROVIDERS", "REFLECTIVE_PUBLIC_MEMBERS", "JAVA_BEANS_CLASSES", "REFLECTIVE_TYPES",
             "NEGATIVE_CLASS_LOOKUPS", "METHOD_LOOKUPS", "RESOURCE_LOOKUPS");
@@ -343,7 +344,8 @@ public class MetadataDiff {
         section("JNI accesses to JDK types outside the desktop modules (GraalVM or Quarkus may register them : verify with "
                 + "a native run)", otherJni);
 
-        for (String kind : List.of("JNI_RUNTIME_ACCESS_CLASSES", "REFLECTIVE_CLASSES", "REFLECTIVE_CONSTRUCTORS")) {
+        for (String kind : List.of("JNI_RUNTIME_ACCESS_CLASSES", "REFLECTIVE_CLASSES", "REFLECTIVE_FIELD_CLASSES",
+                "REFLECTIVE_CONSTRUCTORS")) {
             Set<String> unused = new TreeSet<>();
             for (String name : reg.platformEntries(kind)) {
                 Set<String> used = kind.startsWith("JNI") ? usedJni : usedReflection;
@@ -419,6 +421,8 @@ public class MetadataDiff {
     static final class Registrations {
         final Universe universe;
         final Set<String> reflectiveClasses = new HashSet<>();
+        // REFLECTIVE_FIELD_CLASSES : classes registered with their fields only
+        final Set<String> fieldClasses = new HashSet<>();
         // classes registered as types (REFLECTIVE_TYPES) and lookups expected to fail (NEGATIVE_CLASS_LOOKUPS)
         final Set<String> types = new HashSet<>();
         // the REFLECTIVE_TYPES values of the AWT extension (whose processor registers the .ser lookups)
@@ -466,6 +470,7 @@ public class MetadataDiff {
                     String v = value.replace(" ", "");
                     switch (kind) {
                         case "REFLECTIVE_CLASSES" -> reflectiveClasses.add(v);
+                        case "REFLECTIVE_FIELD_CLASSES" -> fieldClasses.add(v);
                         case "REFLECTIVE_CONSTRUCTORS" -> reflectiveConstructors.add(v);
                         case "REFLECTIVE_METHODS" -> {
                             reflectiveMethods.add(v);
@@ -598,7 +603,8 @@ public class MetadataDiff {
             boolean all = in(reflectiveClasses, type);
             boolean constructors = all || in(reflectiveConstructors, type) || in(providers, type);
             boolean methods = all || in(providers, type);
-            boolean typeRegistered = constructors || methods || reflectiveMethodOwners.contains(type)
+            boolean fields = all || in(fieldClasses, type);
+            boolean typeRegistered = constructors || methods || fields || reflectiveMethodOwners.contains(type)
                     || publicMembers.contains(type) || types.contains(type);
             if (!typeRegistered) {
                 missing.add("type");
@@ -616,14 +622,15 @@ public class MetadataDiff {
                 }
             }
             for (Map<String, Object> f : list(entry.get("fields"))) {
-                if (!all && !reflectiveFields.contains(type + "#" + f.get("name"))
+                if (!fields && !reflectiveFields.contains(type + "#" + f.get("name"))
                         && !publicMember(type, null, null, String.valueOf(f.get("name")))) {
                     missing.add("field #" + f.get("name"));
                 }
             }
             for (String flag : entry.keySet()) {
                 if (flag.startsWith("all") && Boolean.TRUE.equals(entry.get(flag))) {
-                    boolean covered = flag.contains("Constructors") ? constructors : flag.contains("Methods") ? methods : all;
+                    boolean covered = flag.contains("Constructors") ? constructors
+                            : flag.contains("Methods") ? methods : flag.contains("Fields") ? fields : all;
                     if (!covered) {
                         missing.add(flag);
                     }
