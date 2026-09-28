@@ -1,10 +1,13 @@
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * One JVM vs native iteration : JVM build and snapshots (optionally under the tracing agent), native build and snapshots,
@@ -27,6 +30,12 @@ import java.util.List;
  * comparison/jvm2-&lt;label&gt;) instead of a JVM and a native run : the determinism of the pages on a platform without
  * native-image (Windows on arm64), with the same exit codes. The native build gets
  * {@code -Dquarkus.native.native-image-xmx=8g} unless --maven-args sets it.
+ * <p>
+ * The native build writes {@value #NATIVE_BUILD} next to the executable : whether it was built with --exact, its
+ * options and the commit of the sources. --skip-native-build reuses the executable of an earlier cycle : with --exact,
+ * the cycle stops (exit code 2) unless that executable was built with --exact (a native executable built without exact
+ * reachability metadata reports no missing registration : "0 missing" would prove nothing), and it warns when the
+ * executable was built from other sources than the JVM build of the cycle.
  * <p>
  * Exit code 0 when every step succeeded and the runs match ; 1 when a build failed, a snapshot run failed (no report, a
  * crash, the watchdog), the native run of --exact reported accesses missing from the metadata, or the comparison is not
@@ -111,6 +120,9 @@ public class Cycle {
         if (snapshot.awtOnly) {
             mavenArgs.add("-Dawt-only");
         }
+        if (skipNativeBuild && !jvmOnly) {
+            checkNativeBuild(Snapshot.targetDir(snapshot.awtOnly), exact);
+        }
 
         Path logs = Path.of("comparison", "logs-" + label);
         Files.createDirectories(logs);
@@ -185,6 +197,7 @@ public class Cycle {
             }
             Files.readAllLines(log).stream().filter(l -> l.contains("Finished generating") || l.contains("Peak RSS"))
                     .forEach(System.out::println);
+            writeNativeBuild(Snapshot.targetDir(snapshot.awtOnly), exact, nativeArgs, mavenArgs);
             if (Snapshot.isMac() && !macArtifacts(Snapshot.targetDir(snapshot.awtOnly), logs, snapshot.awtOnly)) {
                 System.exit(1);
             }
@@ -229,6 +242,92 @@ public class Cycle {
             System.exit(1);
         }
         step("cycle " + label + " OK");
+    }
+
+    /**
+     * The description of the native build of a cycle, next to the executable (target/ or target/awt-only/).
+     */
+    static final String NATIVE_BUILD = "cycle-native-build.properties";
+
+    /**
+     * Describes the native build that just succeeded, for the cycles that reuse its executable (--skip-native-build).
+     */
+    static void writeNativeBuild(Path target, boolean exact, String nativeArgs, List<String> mavenArgs)
+            throws IOException, InterruptedException {
+        Properties build = new Properties();
+        build.setProperty("exact", String.valueOf(exact));
+        build.setProperty("native-args", nativeArgs == null ? "" : nativeArgs);
+        build.setProperty("maven-args", String.join(",", mavenArgs));
+        build.setProperty("commit", git("rev-parse", "HEAD"));
+        build.setProperty("dirty", String.valueOf(!git("status", "--porcelain", "--untracked-files=no").isEmpty()));
+        build.setProperty("executable-modified",
+                String.valueOf(Files.getLastModifiedTime(Snapshot.nativeExecutable(target)).toMillis()));
+        try (Writer out = Files.newBufferedWriter(target.resolve(NATIVE_BUILD))) {
+            build.store(out, "The native build of Cycle.java");
+        }
+    }
+
+    /**
+     * --skip-native-build : the native executable must come from a cycle with --exact when this one has it ; a warning
+     * when it was built from other sources than the current ones.
+     */
+    static void checkNativeBuild(Path target, boolean exact) throws IOException, InterruptedException {
+        Path file = target.resolve(NATIVE_BUILD);
+        Path runner;
+        try {
+            runner = Snapshot.nativeExecutable(target);
+        } catch (IllegalStateException e) {
+            step("--skip-native-build : " + e.getMessage());
+            System.exit(2);
+            return;
+        }
+        Properties build = new Properties();
+        if (Files.isRegularFile(file)) {
+            try (Reader in = Files.newBufferedReader(file)) {
+                build.load(in);
+            }
+        }
+        if (!String.valueOf(Files.getLastModifiedTime(runner).toMillis()).equals(build.getProperty("executable-modified"))) {
+            // no description, or the executable was built since (mvn package -Dnative)
+            if (exact) {
+                step("--exact --skip-native-build : " + runner + " was not built by a cycle with --exact (no " + file
+                        + ", or the executable was built since) : run the cycle without --skip-native-build");
+                System.exit(2);
+            }
+            step("WARNING : " + runner + " was not built by a cycle : its native image options are unknown");
+            return;
+        }
+        boolean builtExact = Boolean.parseBoolean(build.getProperty("exact"));
+        if (exact && !builtExact) {
+            step("--exact --skip-native-build : " + runner + " was built without --exact-reachability-metadata (" + file
+                    + ") : it reports no missing registration, run the cycle without --skip-native-build");
+            System.exit(2);
+        }
+        if (!exact && builtExact) {
+            step("WARNING : " + runner + " was built with --exact-reachability-metadata, and runs without "
+                    + "-XX:MissingRegistrationReportingMode=Warn : it stops at the first missing registration");
+        }
+        String head = git("rev-parse", "HEAD");
+        if (!head.equals(build.getProperty("commit")) || Boolean.parseBoolean(build.getProperty("dirty"))) {
+            step("WARNING : " + runner + " was built from commit " + build.getProperty("commit")
+                    + (Boolean.parseBoolean(build.getProperty("dirty")) ? " with local changes" : "")
+                    + ", the JVM build of this cycle from " + head + " : the runs may differ by the sources");
+        }
+    }
+
+    /**
+     * The output of a git command in the current directory, empty when git fails.
+     */
+    static String git(String... args) throws InterruptedException {
+        List<String> command = new ArrayList<>(List.of("git"));
+        command.addAll(List.of(args));
+        try {
+            Process process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            return process.waitFor() == 0 ? output : "";
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     /**
