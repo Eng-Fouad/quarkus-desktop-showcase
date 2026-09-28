@@ -202,7 +202,10 @@ public class DragAndDropPage implements FeaturePage {
     public CompletionStage<?> ready(Component content) {
         ChecksView view = robotView;
         DragLog dragLog = log;
-        motionListener = e -> dragLog.motion = true;
+        motionListener = e -> {
+            dragLog.motion = true;
+            dragLog.motionAt = e.getLocation();
+        };
         DragSource.getDefaultDragSource().addDragSourceMotionListener(motionListener);
         TokenSource tokens = source;
         TokenBin target = bin;
@@ -305,7 +308,12 @@ public class DragAndDropPage implements FeaturePage {
             // beyond the drag threshold first, then to the target
             Point start = new Point(plan.from().x + 16, plan.from().y + 4);
             robot.glide(plan.from(), start, 8, 20);
-            robot.glide(start, plan.to(), 24, 15);
+            if (Platforms.isMac()) {
+                // each step once the drag session reported the previous one (macGlide)
+                macGlide(robot, log, start, plan.to());
+            } else {
+                robot.glide(start, plan.to(), 24, 15);
+            }
             DesktopSupport.sleep(200);
             outcome = null;
             // the drop target must see the drag with the expected action before the button is released : the drag
@@ -373,6 +381,63 @@ public class DragAndDropPage implements FeaturePage {
         return true;
     }
 
+    /**
+     * macOS : the glide of {@link RobotSession#glide} (24 steps) from {@code from} to {@code to}, each step once the
+     * drag session reported the previous one, so that the listeners see every position whatever the speed of the EDT.
+     * The Cocoa drag session hands each position to the source ({@code CDragSource.m draggedImage:movedTo:} : dragOver,
+     * then {@code CDragSourceContextPeer.dragMouseMoved} : dragEnter or dragExit when the drop target under the pointer
+     * changes) and to the drop target of the window ({@code CDropTarget.m draggingUpdated:}), both ignoring an unchanged
+     * point, through calls from the AppKit thread that wait for the EDT ({@code LWCToolkit.invokeAndWait},
+     * {@code SunDropTargetContextPeer.postDropTargetEvent} with {@code DISPATCH_SYNC}), while the moves of Robot go on.
+     * With a timed glide, a JVM run once reported a single position in the bin (drag 1), and local JVM runs none between
+     * the bin and the list or two of the five in the list (drag 2) : positions went past the drag session while the EDT
+     * was slow (probably the first drag and drop events of the process ; lost or merged by AppKit, not known). Each step
+     * waits (at most 1 s, then twice 0.5 s after the same move again) until the {@code DragSourceMotionListener} got its
+     * point, then for a round trip of the EDT and 20 ms. A move made again at the same point is not reported twice.
+     * Without a drag (not started, a position not reported, 6 s in all, the EDT not answering) : the rest of the glide
+     * timed as before, logged.
+     */
+    private static void macGlide(RobotSession robot, DragLog log, Point from, Point to) throws Exception {
+        boolean paced = DesktopSupport.await(() -> log.started, 1000);
+        long deadline = System.nanoTime() + 6_000_000_000L;
+        for (int i = 1; i <= 24; i++) {
+            Point p = new Point(from.x + (to.x - from.x) * i / 24, from.y + (to.y - from.y) * i / 24);
+            robot.move(p);
+            if (!paced) {
+                robot.delay(15);
+                continue;
+            }
+            boolean seen = DesktopSupport.await(() -> near(log.motionAt, p), 1000);
+            for (int again = 0; !seen && again < 2; again++) {
+                // the move went past the drag session : made again at the same point (another point could add a
+                // position, e.g. a second one in the gap between the bin and the list)
+                robot.move(p);
+                seen = DesktopSupport.await(() -> near(log.motionAt, p), 500);
+            }
+            String stop = !seen ? "drag position " + p.x + "," + p.y + " not reported"
+                    : System.nanoTime() - deadline > 0 ? "6 s in all" : null;
+            if (stop == null) {
+                try {
+                    DesktopSupport.onEdt(() -> null);
+                } catch (Exception e) {
+                    stop = "the EDT did not answer : " + e;
+                }
+            }
+            if (stop != null) {
+                // the rest of the glide timed
+                RobotSession.logRetry("dt-dnd glide step " + i + " of 24", 3, stop);
+                paced = false;
+                continue;
+            }
+            robot.delay(20);
+        }
+    }
+
+    /** {@code true} when the location of a drag event is {@code p}, within 4 pixels. */
+    private static boolean near(Point location, Point p) {
+        return location != null && Math.abs(location.x - p.x) <= 4 && Math.abs(location.y - p.y) <= 4;
+    }
+
     static String action(int action) {
         return switch (action) {
             case DnDConstants.ACTION_NONE -> "NONE";
@@ -401,6 +466,8 @@ public class DragAndDropPage implements FeaturePage {
         volatile boolean ended;
         volatile boolean success;
         volatile boolean motion;
+        /** The screen location of the last {@code DragSourceMotionListener} event of the current drag. */
+        volatile Point motionAt;
         /** The drop action of the last drag event of a drop target. */
         volatile int overAction;
         int dropAction;
@@ -415,6 +482,7 @@ public class DragAndDropPage implements FeaturePage {
             started = false;
             ended = false;
             success = false;
+            motionAt = null;
             overAction = 0;
             dropAction = 0;
             data = null;
