@@ -22,7 +22,9 @@ import javax.imageio.ImageIO;
  * Writes summary.txt, index.html and diff images into the output directory. Exit code 0 when both runs match and
  * none reported errors, 1 otherwise (two runs without any page or image do not match). {@code --require-focus} (for
  * unattended runs, e.g. CI) also fails a page that needs the focus when it never got it in a run ({@code focusAttempts}
- * 0) : its Robot input was skipped, even if both runs skipped it alike.
+ * 0), or when one of its own windows never got it or its Robot input was skipped for want of the focus ({@link
+ * #FOCUS_SKIPS}, or an {@code (attempts)} check at 0) : its Robot input was skipped, even if both runs skipped it
+ * alike.
  * <p>
  * Environment : every top level key of the reports (except pages) is compared, a difference is an {@code ENV DIFF}
  * mismatch (another Java2D pipeline, DPI awareness, look and feel, desktop features...), except for the keys of
@@ -56,6 +58,18 @@ public class Compare {
     static final List<String> NOT_ENV_KEYS = List.of("pages", "uncaughtOutsidePages");
     /** Suffix of the checks counting the attempts of an action on the live desktop (core/Check.attempts). */
     static final String ATTEMPTS = " (attempts)";
+    /**
+     * The check values of the pages whose Robot input was skipped because a window of theirs never got (or lost) the
+     * focus, or was covered : failures with {@code --require-focus}, even when both runs skipped it alike. The other
+     * {@code skipped:} values (snapshot mode only, none on this platform, a macOS permission...) do not depend on the
+     * focus.
+     */
+    static final List<String> FOCUS_SKIPS = List.of("skipped: not focused", "skipped: focus lost",
+            "skipped: window covered", "skipped: the window was not focused", "skipped: the page window was not focused",
+            "skipped: the page is not visible on screen", "skipped: the Robot field lost the focus",
+            "skipped: keyboard input not received");
+    /** The check that lists the Robot inputs skipped for want of the focus (awt-events). */
+    static final String SKIPPED_INPUTS = "skipped inputs";
 
     record ImageResult(String file, String status, long differing, long total, int maxDelta, String diffFile) {
     }
@@ -196,6 +210,10 @@ public class Compare {
                         if (Boolean.TRUE.equals(page.get("needsFocus"))
                                 && !(page.get("focusAttempts") instanceof Number n && n.intValue() > 0)) {
                             notes.add("focus: the page never got the focus in " + run.getKey() + " (--require-focus)");
+                        }
+                        // the windows of the page itself, and its Robot input
+                        for (String problem : focusProblems(page)) {
+                            notes.add("focus: " + problem + " in " + run.getKey() + " (--require-focus)");
                         }
                     }
                 }
@@ -362,6 +380,27 @@ public class Compare {
             }
         }
         return checks;
+    }
+
+    /**
+     * The checks of a page that tell that its Robot input was skipped for want of the focus : an {@code (attempts)} check
+     * at 0 (a window of the page never got the focus), a {@link #FOCUS_SKIPS} value, the {@link #SKIPPED_INPUTS} check.
+     */
+    @SuppressWarnings("unchecked")
+    static List<String> focusProblems(Map<String, Object> page) {
+        List<String> problems = new ArrayList<>();
+        if (page.get("checks") instanceof List<?> list) {
+            for (Object c : list) {
+                Map<String, Object> check = (Map<String, Object>) c;
+                String name = String.valueOf(check.get("name"));
+                String value = String.valueOf(check.get("value"));
+                if (name.endsWith(ATTEMPTS) && value.equals("0") || name.equals(SKIPPED_INPUTS)
+                        || FOCUS_SKIPS.stream().anyMatch(value::startsWith)) {
+                    problems.add("check '" + name + "' = " + value);
+                }
+            }
+        }
+        return problems;
     }
 
     static void writeHtml(Path out, Path a, Path b, Map<String, Object> ra, Map<String, Object> rb, List<ImageResult> images,
