@@ -216,6 +216,7 @@ public class HtmlRtfPage implements FeaturePage {
         JEditorPane pane = page;
         return Edt.until(() -> loaded, 15_000, "HTML page loaded")
                 .thenCompose(v -> {
+                    layoutViews(pane);
                     fitHeight(pane, WIDTH);
                     ((JComponent) content).revalidate();
                     return Edt.rounds(3);
@@ -231,6 +232,19 @@ public class HtmlRtfPage implements FeaturePage {
                     return Edt.rounds(2);
                 })
                 .thenCompose(v -> Edt.stable(content, 3_000));
+    }
+
+    /**
+     * Lays the views of {@code pane} out at its size in the page, as its validation does (the layout manager of
+     * BasicTextUI lays them out in the visible editor rectangle to place the form components), before {@code fitHeight}
+     * measures the height at {@link #WIDTH} : that height depends on the layout before it. A paragraph flowed again at
+     * another width keeps its height when it keeps its number of rows (FlowView), here the paragraph of mixed font sizes
+     * under the title. The validation is queued when the form components are added, and it ran before or after the poll
+     * of {@code Edt.until} that saw the "page" event : the page was 5 px shorter on Linux now and then (the pane 987 px
+     * high instead of 992 px).
+     */
+    private static void layoutViews(JEditorPane pane) {
+        pane.doLayout();
     }
 
     @Override
