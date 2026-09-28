@@ -123,12 +123,13 @@ Everything AWT and Swing need in a native executable comes from quarkus-desktop.
   profile of `pom.xml`), the JDK internals that the macOS capture of the AWT components reads by reflection
   (`java.awt.Component#peer`, `sun.lwawt.LWComponentPeer#getDelegate()`, with the `add-opens` of the `mac` profile),
   and the lookups that an `--exact-reachability-metadata` build needs for its own classes and resources: the types of
-  its Synth painter and JavaBeans, the JavaBeans probes of its beans that do not exist (`BeanInfo`, `Customizer`,
+  its JavaBeans, the JavaBeans probes of its beans that do not exist (`BeanInfo`, `Customizer`,
   `PersistenceDelegate`, `Editor`, `java.beans.MetaData$..._PersistenceDelegate`) and the serialized forms that
   `Beans.instantiate` looks for (`.../pages/beans/*.ser`), the absent names its pages look up on purpose
   (`no.such.Bean`, `no.such.Type`, `no/such/*.ser`, missing images), the configuration files that Quarkus looks for,
-  and the `provider()` method of the JDK locale data provider. These were taken from a Windows exact-mode trace: Linux
-  and macOS exact-mode runs may need more;
+  the URL stream handler providers that `URL.of` looks for, and the `provider()` method of the JDK locale data
+  provider (the classes of its Synth XML files are registered by quarkus-desktop-swing). The exact-mode cycles on
+  Windows, Linux and macOS report no other missing registration;
 - enables the JavaBeans registration of the JDK Swing classes (`quarkus.desktop.swing.java-beans.jdk-classes=true`; the
   AWT one, `quarkus.desktop.awt.java-beans.jdk-classes`, is enabled by default): the beans pages introspect, encode and
   decode AWT and Swing components;

@@ -14,8 +14,6 @@
     { "type": "java.awt.Component", "fields": [ { "name": "peer" } ] },
     { "type": "sun.lwawt.LWComponentPeer", "methods": [ { "name": "getDelegate", "parameterTypes": [] } ] },
     { "type": "sun.util.resources.provider.LocaleDataProvider", "methods": [ { "name": "provider", "parameterTypes": [] } ] },
-    { "type": "io.quarkiverse.desktop.showcase.pages.laf.ShowcaseSynthPainter" },
-    { "type": "io.quarkiverse.desktop.showcase.pages.laf.ShowcaseSynthPainter$MenuArrowIcon" },
     { "type": "io.quarkiverse.desktop.showcase.pages.beans.PrintJobBean" },
     { "type": "io.quarkiverse.desktop.showcase.pages.beans.PrintJobBean$JobEvent" },
     { "type": "io.quarkiverse.desktop.showcase.pages.beans.PrintJobBean$JobListener" },
