@@ -292,10 +292,14 @@ public class DesktopServicesPage implements FeaturePage {
             desktop.setPrintFileHandler(null);
             return "reset";
         }));
-        checks.add(handler(desktop, Desktop.Action.APP_QUIT_HANDLER, "setQuitHandler(null)", () -> {
-            desktop.setQuitHandler(null);
-            return "reset";
-        }));
+        // the quit handler of quarkus-desktop (QuitRequest) : null would restore the one of the JDK (System.exit on the
+        // AppKit thread) for the rest of the run, so it is only called where it is unsupported
+        checks.add(desktop.isSupported(Desktop.Action.APP_QUIT_HANDLER)
+                ? Check.info("setQuitHandler(null)", "not called : quarkus-desktop handles the quit requests (QuitRequest)")
+                : handler(desktop, Desktop.Action.APP_QUIT_HANDLER, "setQuitHandler(null)", () -> {
+                    desktop.setQuitHandler(null);
+                    return "reset";
+                }));
         checks.add(handler(desktop, Desktop.Action.APP_QUIT_STRATEGY, "setQuitStrategy(NORMAL_EXIT)", () -> {
             desktop.setQuitStrategy(QuitStrategy.NORMAL_EXIT);
             return "set";

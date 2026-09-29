@@ -20,8 +20,10 @@ import java.awt.desktop.UserSessionListener;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Singleton;
 
+import io.quarkiverse.desktop.awt.QuitRequest;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -39,7 +41,8 @@ import io.quarkiverse.desktop.showcase.core.Ui;
  * thread of the process runs its event loop : quarkus-desktop does it in native executables) : the About handler
  * replacing the standard About panel proves it. In snapshot mode the page only installs them (the log stays empty) ;
  * with {@code -Dshowcase.interactive=true} the page stays and logs the events of the manual checks of the README.
- * Handlers and listeners are removed when the page is left. AWT only.
+ * Handlers and listeners are removed when the page is left, except the quit handler of quarkus-desktop : the page
+ * observes {@code QuitRequest} instead. AWT only.
  */
 @Singleton
 public class MacAppEventsPage implements FeaturePage {
@@ -102,13 +105,8 @@ public class MacAppEventsPage implements FeaturePage {
             desktop.setPreferencesHandler(e -> event("preferences"));
             return "installed";
         }));
-        installed.add(Checks.run("setQuitHandler", () -> {
-            desktop.setQuitHandler((e, response) -> {
-                event("quit requested : cancelled by the page");
-                response.cancelQuit();
-            });
-            return "installed";
-        }));
+        // the quit handler is the one of quarkus-desktop : the page observes QuitRequest (see quit)
+        installed.add(Check.info("QuitRequest observer", "cancels the quit requests while this page is shown"));
         installed.add(Checks.run("setQuitStrategy(CLOSE_ALL_WINDOWS)", () -> {
             desktop.setQuitStrategy(QuitStrategy.CLOSE_ALL_WINDOWS);
             return "set";
@@ -160,7 +158,7 @@ public class MacAppEventsPage implements FeaturePage {
         if (Platforms.isMac() && Desktop.isDesktopSupported()) {
             Desktop desktop = Desktop.getDesktop();
             for (Runnable restore : List.<Runnable> of(() -> desktop.setAboutHandler(null),
-                    () -> desktop.setPreferencesHandler(null), () -> desktop.setQuitHandler(null),
+                    () -> desktop.setPreferencesHandler(null),
                     () -> desktop.setQuitStrategy(QuitStrategy.NORMAL_EXIT), () -> desktop.setOpenFileHandler(null),
                     () -> desktop.setOpenURIHandler(null), () -> desktop.setPrintFileHandler(null),
                     () -> {
@@ -178,6 +176,18 @@ public class MacAppEventsPage implements FeaturePage {
         listener = null;
         events = null;
         log.clear();
+    }
+
+    /**
+     * The quit requests (application menu, Cmd-Q, Dock) : cancelled while the page is shown. quarkus-desktop owns the quit
+     * handler of {@code java.awt.Desktop} : setting another one, or {@code null} (the one of the JDK, which calls
+     * {@code System.exit} on the AppKit thread), would replace it for the rest of the run.
+     */
+    void quit(@Observes QuitRequest request) {
+        if (events != null) {
+            event("quit requested : cancelled by the page");
+            request.cancel();
+        }
     }
 
     /**
