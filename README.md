@@ -527,9 +527,6 @@ git clone https://github.com/quarkiverse/quarkus-desktop
 git clone https://github.com/Eng-Fouad/quarkus-desktop-showcase
 ```
 
-The quarkus-desktop documentation page "Verifying macOS support" (`docs/modules/ROOT/pages/macos-verification.adoc`)
-checks a small probe application first (window, threads, libraries, Metal, exit codes): run it before the showcase.
-
 ### 2. JVM and native cycles
 
 ```bash
