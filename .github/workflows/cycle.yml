@@ -14,7 +14,7 @@ on:
       desktop-repository:
         description: The quarkus-desktop repository
         type: string
-        default: Eng-Fouad/quarkus-desktop
+        default: quarkiverse/quarkus-desktop
       desktop-ref:
         description: The quarkus-desktop branch, tag or commit
         type: string

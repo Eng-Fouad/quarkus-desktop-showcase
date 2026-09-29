@@ -26,8 +26,8 @@ The awt-only variant proves that quarkus-desktop-awt works without Swing applica
   Quarkus from it) and GraalVM 25.1 or later: see [Verifying on macOS](#verifying-on-macos)
 - JDK 25 for the JVM mode and the tools, GraalVM for JDK 25 for native executables (`GRAALVM_HOME`)
 - quarkus-desktop `999-SNAPSHOT` installed in the local Maven repository: clone
-  [quarkus-desktop](https://github.com/Eng-Fouad/quarkus-desktop) and run `mvn install` in it
-  (`git clone https://github.com/Eng-Fouad/quarkus-desktop && cd quarkus-desktop && mvn install -DskipTests`)
+  [quarkus-desktop](https://github.com/quarkiverse/quarkus-desktop) and run `mvn install` in it
+  (`git clone https://github.com/quarkiverse/quarkus-desktop && cd quarkus-desktop && mvn install -DskipTests`)
 - Native builds: the [Quarkus native prerequisites](https://quarkus.io/guides/building-native-image) (Visual Studio
   Build Tools on Windows, gcc and zlib development packages on Linux)
 
@@ -522,7 +522,7 @@ cd quarkus-pr-56979
 git fetch https://github.com/quarkusio/quarkus pull/56979/head:pr-56979 && git checkout pr-56979
 ./mvnw -Dquickly                            # installs Quarkus 999-SNAPSHOT (tens of minutes)
 cd ~/dev
-git clone https://github.com/Eng-Fouad/quarkus-desktop
+git clone https://github.com/quarkiverse/quarkus-desktop
 (cd quarkus-desktop && ./mvnw -B install -DskipTests)
 git clone https://github.com/Eng-Fouad/quarkus-desktop-showcase
 ```
