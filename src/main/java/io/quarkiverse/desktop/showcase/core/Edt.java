@@ -23,7 +23,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -39,13 +38,12 @@ import java.util.stream.Stream;
  * <p>
  * Every stage returned here completes on the EDT, so that {@code thenApply}/{@code thenCompose}/{@code thenAccept}
  * continuations (non async variants) run on the EDT too. They work in the AWT-only variant (no {@code javax.swing}).
+ * <p>
+ * quarkus-desktop has the rest : its {@code io.quarkiverse.desktop.awt.EdtExecutor} bean runs asynchronous stages on
+ * the EDT ({@code thenComposeAsync(..., edt)}, {@code CompletableFuture.supplyAsync(..., edt)}), and
+ * {@code io.quarkiverse.desktop.awt.Edt.call} waits for a task on the EDT from a background thread.
  */
 public final class Edt {
-
-    /**
-     * Runs asynchronous stages on the EDT ({@code thenRunAsync(..., Edt.EDT)}).
-     */
-    public static final Executor EDT = EventQueue::invokeLater;
 
     private static final long POLL_MILLIS = 20;
     private static final long STABLE_POLL_MILLIS = 50;
@@ -192,21 +190,6 @@ public final class Edt {
             scheduler().schedule(() -> EventQueue.invokeLater(() -> stable(component, deadline, pixels, identical, done)),
                     STABLE_POLL_MILLIS, TimeUnit.MILLISECONDS);
         }
-    }
-
-    /**
-     * Runs {@code action} later on the EDT.
-     */
-    public static <T> CompletionStage<T> supply(Callable<T> action) {
-        CompletableFuture<T> done = new CompletableFuture<>();
-        EventQueue.invokeLater(() -> {
-            try {
-                done.complete(action.call());
-            } catch (Throwable t) {
-                done.completeExceptionally(t);
-            }
-        });
-        return done;
     }
 
     /**

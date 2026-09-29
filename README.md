@@ -53,7 +53,8 @@ The application has no `@QuarkusMain`: `ShowcaseApp` opens the main window in an
 which quarkus-desktop fires on the event dispatch thread once the application started (its `StartupEvent` observer runs
 the work before the user interface, such as the macOS permission probes of `-Dshowcase.robot=true`). The application
 stops with `Quarkus.asyncExit()`, called when the main window is closed (or with Showcase > Quit, or at the end of a
-snapshot run).
+snapshot run). The pages run their event dispatch thread continuations on the `EdtExecutor` bean of quarkus-desktop, and
+wait for the event dispatch thread from background threads with its `Edt.call`.
 
 Page filters (interactive and snapshot mode): `-Dshowcase.pages=overview-environment,j2d-` (page ids, an entry ending
 with `-` or `*` is a prefix) and `-Dshowcase.categories=java2d,text` (category keys `overview, awt, java2d, text, images,

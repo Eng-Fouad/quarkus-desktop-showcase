@@ -1009,8 +1009,8 @@ public class AwtEventsPage implements FeaturePage {
             checks.add(Check.info("scroll direction (macOS preference com.apple.swipescrolldirection)",
                     natural == null ? "unknown" : natural ? "natural" : "not natural"));
             // what the canvas paints, for its capture (see snapToPainted)
-            painted = Edt.supply(() -> paintedCanvas(target)).toCompletableFuture().get(10,
-                    java.util.concurrent.TimeUnit.SECONDS);
+            painted = io.quarkiverse.desktop.awt.Edt.call(() -> paintedCanvas(target),
+                    java.time.Duration.ofSeconds(10));
         }
         try (RobotSession robot = RobotSession.open()) {
             if (Platforms.isMac()) {

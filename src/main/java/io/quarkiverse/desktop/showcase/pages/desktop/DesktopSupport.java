@@ -9,14 +9,15 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Window;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Callable;
 
+import io.quarkiverse.desktop.awt.Edt;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
-import io.quarkiverse.desktop.showcase.core.Edt;
 import io.quarkiverse.desktop.showcase.core.RobotSession;
 
 /**
@@ -177,21 +178,10 @@ public final class DesktopSupport {
     }
 
     /**
-     * Runs {@code action} on the EDT and waits for its result (from a background thread only).
+     * Runs {@code action} on the EDT and waits for its result, at most 10 s (from a background thread only).
      */
     public static <T> T onEdt(Callable<T> action) throws Exception {
-        if (Edt.isEdt()) {
-            return action.call();
-        }
-        try {
-            return Edt.supply(action).toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (java.util.concurrent.ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof Exception ex) {
-                throw ex;
-            }
-            throw e;
-        }
+        return Edt.call(action, Duration.ofSeconds(10));
     }
 
     /**

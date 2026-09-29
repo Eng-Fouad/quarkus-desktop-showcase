@@ -43,8 +43,10 @@ import javax.print.attribute.standard.JobName;
 import javax.print.attribute.standard.MediaSizeName;
 import javax.print.attribute.standard.OrientationRequested;
 
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
+import io.quarkiverse.desktop.awt.EdtExecutor;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -81,6 +83,10 @@ public class PrintDialogsPage implements FeaturePage {
 
     private static final double THUMBNAIL_SCALE = 0.45;
     private static final long APPEAR_MILLIS = 15_000;
+
+    /** The continuations of {@link #ready} that run on the EDT. */
+    @Inject
+    EdtExecutor edt;
 
     private ChecksView results;
     private Container thumbnails;
@@ -137,9 +143,9 @@ public class PrintDialogsPage implements FeaturePage {
                 new DialogRun("printJob", "Toolkit.getPrintJob(frame, title, COMMON dialog)", () -> toolkitPrintJob(owner)));
         CompletionStage<Void> chain = CompletableFuture.completedFuture(null);
         for (DialogRun run : runs) {
-            chain = chain.thenComposeAsync(v -> open(run, checks), Edt.EDT);
+            chain = chain.thenComposeAsync(v -> open(run, checks), edt);
         }
-        return chain.thenComposeAsync(v -> interactive(checks), Edt.EDT).thenRun(() -> {
+        return chain.thenComposeAsync(v -> interactive(checks), edt).thenRun(() -> {
             captures.forEach((key, image) -> row.add(Ui.column(4, Ui.image(scale(image)), Ui.caption(key))));
             synchronized (checks) {
                 view.setChecks(List.copyOf(checks));

@@ -20,11 +20,13 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
 import jakarta.enterprise.event.Observes;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import io.quarkiverse.desktop.awt.EdtExecutor;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.StartupEvent;
 
@@ -44,6 +46,10 @@ public class SnapshotRunner {
      * How long the background threads of a page may still run after it : then interrupted, and waited for as long again.
      */
     private static final long BACKGROUND_GRACE_MILLIS = 5_000;
+
+    /** Runs the stages of the run on the EDT ({@code thenComposeAsync(..., edt)}). */
+    @Inject
+    EdtExecutor edt;
 
     @ConfigProperty(name = "showcase.snapshot.dir")
     Optional<String> dir;
@@ -107,10 +113,10 @@ public class SnapshotRunner {
                 .thenCompose(v -> Edt.rounds(2))
                 .thenCompose(v -> releaseFocus(window))
                 .thenRunAsync(() -> writeImage(Snapshots.render(window.rootContent(), scale), out.resolve("_main-window.png")),
-                        Edt.EDT);
+                        edt);
         for (FeaturePage page : pages) {
             chain = chain.thenCompose(v -> awaitBackground())
-                    .thenComposeAsync(v -> capture(window, page, out), Edt.EDT).thenAccept(result -> {
+                    .thenComposeAsync(v -> capture(window, page, out), edt).thenAccept(result -> {
                 results.add(result);
                 // written after every page too : a run that crashes (e.g. a native executable) still has a report
                 writeReport(out, results, false);
@@ -135,7 +141,7 @@ public class SnapshotRunner {
                 }
                 Quarkus.asyncExit();
             }
-        }, Edt.EDT);
+        }, edt);
     }
 
     /**
@@ -177,14 +183,14 @@ public class SnapshotRunner {
                 ShowcaseMode.realInput(true);
                 focus = bringToFront(window, result);
             }
-            return focus.thenComposeAsync(v -> capturePage(window, page, out, result, errors, start), Edt.EDT)
+            return focus.thenComposeAsync(v -> capturePage(window, page, out, result, errors, start), edt)
                     .whenCompleteAsync((r, error) -> {
                         if (lock != null) {
                             ShowcaseMode.realInput(false);
                             lock.close();
                         }
-                    }, Edt.EDT);
-        }, Edt.EDT);
+                    }, edt);
+        }, edt);
     }
 
     /**
@@ -251,7 +257,7 @@ public class SnapshotRunner {
                         extras = CompletableFuture.failedFuture(t);
                     }
                     return Edt.timeout(extras, readyTimeoutSeconds * 1000L, "extra snapshots");
-                }, Edt.EDT)
+                }, edt)
                 .handleAsync((extras, error) -> {
                     Map<String, BufferedImage> images = new TreeMap<>();
                     if (error != null) {
@@ -303,7 +309,7 @@ public class SnapshotRunner {
                     result.put("millis", (System.nanoTime() - start) / 1_000_000);
                     LOG.infof("%-40s %s", page.id(), errors.isEmpty() ? "ok" : errors.size() + " error(s)");
                     return result;
-                }, Edt.EDT);
+                }, edt);
     }
 
     private static Throwable unwrap(Throwable error) {

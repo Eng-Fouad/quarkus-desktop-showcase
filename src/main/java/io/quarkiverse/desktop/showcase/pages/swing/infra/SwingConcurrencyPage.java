@@ -33,8 +33,10 @@ import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.event.SwingPropertyChangeSupport;
 
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
+import io.quarkiverse.desktop.awt.EdtExecutor;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -59,6 +61,10 @@ public class SwingConcurrencyPage implements FeaturePage {
 
     private static final int TICKS = 5;
     private static final int PRIME_LIMIT = 2000;
+
+    /** Runs the SecondaryLoop of an event handler (an event of its own). */
+    @Inject
+    EdtExecutor edt;
 
     // per build state
     private State state;
@@ -580,8 +586,8 @@ public class SwingConcurrencyPage implements FeaturePage {
 
     // ------------------------------------------------------------------------------------------------ SecondaryLoop
 
-    private static CompletionStage<Void> secondaryLoopOnEdt(State s) {
-        return Edt.supply(() -> {
+    private CompletionStage<Void> secondaryLoopOnEdt(State s) {
+        return CompletableFuture.supplyAsync(() -> {
             SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
             List<String> inner = Collections.synchronizedList(new ArrayList<>());
             CompletableFuture<Boolean> exited = new CompletableFuture<>();
@@ -614,7 +620,7 @@ public class SwingConcurrencyPage implements FeaturePage {
             // the loop is not active any more
             boolean again = loop.exit();
             return new LoopResult(inner, exited, again);
-        }).thenCompose(result -> Edt.timeout(result.exited(), 5000, "exit()").handle((exit, error) -> {
+        }, edt).thenCompose(result -> Edt.timeout(result.exited(), 5000, "exit()").handle((exit, error) -> {
             add(s, Checks.expect("SecondaryLoop on the EDT : events dispatched inside enter()",
                     "event 1 dispatched inside the loop ; event 2 dispatched inside the loop ; event 3 "
                             + "dispatched inside the loop ; enter() returned true",

@@ -13,11 +13,11 @@ import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.InputEvent;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -290,17 +290,7 @@ public final class Focus {
     }
 
     static <T> T onEdt(Callable<T> action) throws Exception {
-        if (Edt.isEdt()) {
-            return action.call();
-        }
-        try {
-            return Edt.supply(action).toCompletableFuture().get(10, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof Exception ex) {
-                throw ex;
-            }
-            throw e;
-        }
+        return io.quarkiverse.desktop.awt.Edt.call(action, Duration.ofSeconds(10));
     }
 
     /**

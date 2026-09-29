@@ -864,14 +864,7 @@ public class SwingKeyBindingsPage implements FeaturePage {
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> action) throws Exception {
-        try {
-            return Edt.supply(action).toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (java.util.concurrent.ExecutionException e) {
-            if (e.getCause() instanceof Exception ex) {
-                throw ex;
-            }
-            throw e;
-        }
+        return io.quarkiverse.desktop.awt.Edt.call(action, java.time.Duration.ofSeconds(10));
     }
 
     /**

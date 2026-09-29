@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -48,8 +49,10 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.table.DefaultTableModel;
 
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
+import io.quarkiverse.desktop.awt.EdtExecutor;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -77,6 +80,10 @@ public class SwingPrintingPage implements FeaturePage {
     private static final double A4_H = 841.8897637795275;
     private static final double MARGIN = 72;
     private static final double THUMB = 0.3;
+
+    /** Reads the extra snapshots on the EDT. */
+    @Inject
+    EdtExecutor edt;
     /** The page transform of a landscape page : {@code [0.0 -a b 0.0 tx ty] concat}. */
     private static final String ROTATED = "^\\[0\\.0 -[0-9.]+ [0-9.]+ 0\\.0 [0-9.]+ [0-9.]+\\] concat$";
 
@@ -220,7 +227,7 @@ public class SwingPrintingPage implements FeaturePage {
     @Override
     public CompletionStage<Map<String, BufferedImage>> extraSnapshots(Component content) {
         Demo d = demo;
-        return Edt.supply(() -> new TreeMap<>(d.extras));
+        return CompletableFuture.supplyAsync(() -> new TreeMap<>(d.extras), edt);
     }
 
     @Override

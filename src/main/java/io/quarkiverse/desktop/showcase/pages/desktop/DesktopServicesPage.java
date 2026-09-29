@@ -49,10 +49,12 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
 import org.jboss.logging.Logger;
 
+import io.quarkiverse.desktop.awt.EdtExecutor;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.Check;
 import io.quarkiverse.desktop.showcase.core.Checks;
@@ -79,6 +81,10 @@ import io.quarkiverse.desktop.showcase.core.Ui;
 public class DesktopServicesPage implements FeaturePage {
 
     private static final Logger LOG = Logger.getLogger(DesktopServicesPage.class);
+
+    /** The continuations of {@link #ready} that run on the EDT. */
+    @Inject
+    EdtExecutor edt;
 
     /**
      * The screen point of the tray icon, {@code x,y}, when the environment knows it : the Linux Docker environment of
@@ -177,12 +183,12 @@ public class DesktopServicesPage implements FeaturePage {
                 .thenAccept(desktop::setChecks)
                 .thenCompose(v -> Edt.background(() -> taskbarChecks(window)))
                 .thenAccept(taskbar::setChecks)
-                .thenCompose(v -> Edt.supply(this::trayChecks))
+                .thenCompose(v -> CompletableFuture.supplyAsync(this::trayChecks, edt))
                 .thenCompose(run -> run.icon() != null && trayIconPoint() != null
                         ? Edt.background(() -> trayInput(run))
                         : CompletableFuture.completedFuture(run))
-                .thenCompose(run -> Edt.supply(() -> trayRemove(run)))
-                .thenComposeAsync(checks -> trayFocusBack(window).thenApply(v -> checks), Edt.EDT)
+                .thenCompose(run -> CompletableFuture.supplyAsync(() -> trayRemove(run), edt))
+                .thenComposeAsync(checks -> trayFocusBack(window).thenApply(v -> checks), edt)
                 .thenAccept(tray::setChecks);
     }
 
