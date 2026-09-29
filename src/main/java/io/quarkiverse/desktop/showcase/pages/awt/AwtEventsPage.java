@@ -1117,6 +1117,10 @@ public class AwtEventsPage implements FeaturePage {
         // then record
         robot.move(rest(origin));
         robot.delay(100);
+        // a retry focused the frame again (RobotSession.ensureFocus : the window focused) : the FOCUS_GAINED of the
+        // canvas comes later, it is handled before the log is cleared (it was recorded once on windows-11-arm)
+        io.quarkiverse.desktop.showcase.pages.desktop.DesktopSupport.await(target::isFocusOwner, 3000);
+        robot.idle();
         target.log.clear();
         target.recording = true;
 
