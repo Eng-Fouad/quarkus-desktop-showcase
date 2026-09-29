@@ -49,8 +49,11 @@ Native executable (`...-runner.exe` on Windows, next to its `.dll`, `.so` or `.d
 
 AWT only variant: add `-Dawt-only` to the builds, and run `target/awt-only/...`.
 
-The application has a `@QuarkusMain` (`ShowcaseMain`): it opens the main window on the event dispatch thread and waits
-for `Quarkus.asyncExit()`, called when the main window is closed (or with Showcase > Quit).
+The application has no `@QuarkusMain`: `ShowcaseApp` opens the main window in an observer of `DesktopStartupEvent`,
+which quarkus-desktop fires on the event dispatch thread once the application started (its `StartupEvent` observer runs
+the work before the user interface, such as the macOS permission probes of `-Dshowcase.robot=true`). The application
+stops with `Quarkus.asyncExit()`, called when the main window is closed (or with Showcase > Quit, or at the end of a
+snapshot run).
 
 Page filters (interactive and snapshot mode): `-Dshowcase.pages=overview-environment,j2d-` (page ids, an entry ending
 with `-` or `*` is a prefix) and `-Dshowcase.categories=java2d,text` (category keys `overview, awt, java2d, text, images,

@@ -54,16 +54,16 @@ public final class ShowcaseMode {
     }
 
     /**
-     * The name of the thread that runs {@code QuarkusApplication.run} : {@code main} with the JVM and in native
-     * executables (on macOS, quarkus-desktop runs the application on a new thread named {@code main}, the first thread
-     * of the process running the Cocoa event loop, as with the {@code java} launcher).
+     * The name of the thread that starts the application (the {@code StartupEvent} observers) : {@code main} with the JVM
+     * and in native executables (on macOS, quarkus-desktop runs the application on a new thread named {@code main}, the
+     * first thread of the process running the Cocoa event loop, as with the {@code java} launcher).
      */
     public static String mainThread() {
         return mainThread;
     }
 
     /**
-     * Records the thread that runs {@code QuarkusApplication.run} (called by it).
+     * Records the thread that starts the application (called by a {@code StartupEvent} observer).
      */
     public static void mainThread(Thread thread) {
         mainThread = thread.getName();

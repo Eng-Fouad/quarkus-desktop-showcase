@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -14,17 +15,26 @@ import jakarta.inject.Singleton;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import io.quarkiverse.desktop.awt.DesktopStartupEvent;
 import io.quarkiverse.desktop.showcase.core.Categories;
 import io.quarkiverse.desktop.showcase.core.FeaturePage;
+import io.quarkiverse.desktop.showcase.core.MacEnvironment;
 import io.quarkiverse.desktop.showcase.core.MainWindow;
+import io.quarkiverse.desktop.showcase.core.ShowcaseMode;
 import io.quarkiverse.desktop.showcase.core.SnapshotRunner;
 import io.quarkiverse.desktop.showcase.core.UiSetup;
 import io.quarkiverse.desktop.showcase.core.UiSelection;
 import io.quarkus.runtime.Quarkus;
+import io.quarkus.runtime.StartupEvent;
 
 /**
  * Page registry and main window : sorts the pages, applies the page filters, opens the main window and starts the
  * snapshot run in snapshot mode.
+ * <p>
+ * The application has no {@code @QuarkusMain} : quarkus-desktop fires {@link DesktopStartupEvent} on the event dispatch
+ * thread once the application started, and the application stops with {@code Quarkus.asyncExit()} : closing the main
+ * window, the Quit menu item, or the end of a snapshot run (quarkus-desktop also stops it when its last visible window
+ * closes).
  */
 @Singleton
 public class ShowcaseApp {
@@ -59,9 +69,19 @@ public class ShowcaseApp {
     Optional<String> ui;
 
     /**
+     * Before the user interface, on the thread that starts the application (off the EDT) : the {@code StartupEvent}
+     * observers run before {@link DesktopStartupEvent} is fired.
+     */
+    void beforeUserInterface(@Observes StartupEvent event) {
+        ShowcaseMode.mainThread(Thread.currentThread());
+        // macOS, -Dshowcase.robot=true : the Robot permissions, before the user interface starts (off the EDT)
+        MacEnvironment.probePermissions();
+    }
+
+    /**
      * Opens the main window (on the EDT).
      */
-    void start() {
+    void start(@Observes DesktopStartupEvent event) {
         try {
             setups.forEach(UiSetup::apply);
             List<FeaturePage> pages = pages();

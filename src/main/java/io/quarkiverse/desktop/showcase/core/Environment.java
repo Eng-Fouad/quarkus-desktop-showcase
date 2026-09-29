@@ -53,8 +53,8 @@ public final class Environment {
         env.put("headless", headless);
         env.put("javaAwtHeadless", String.valueOf(System.getProperty("java.awt.headless")));
         env.put("javaHome", String.valueOf(System.getProperty("java.home")));
-        // the thread running QuarkusApplication.run : main with the JVM and in native executables (on macOS the first
-        // thread runs the Cocoa event loop, set by quarkus-desktop in native executables, informational)
+        // the thread starting the application (StartupEvent) : main with the JVM and in native executables (on macOS the
+        // first thread runs the Cocoa event loop, set by quarkus-desktop in native executables, informational)
         env.put("mainThread", ShowcaseMode.mainThread());
         env.put("mainThreadParked", property("io.quarkiverse.desktop.main-thread-parked"));
         // raw values : a native executable gets its defaults from quarkus-desktop (sun.java2d.dpiaware), the tools force

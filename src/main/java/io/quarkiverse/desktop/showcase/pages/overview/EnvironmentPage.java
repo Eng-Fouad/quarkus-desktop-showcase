@@ -75,6 +75,8 @@ public class EnvironmentPage implements FeaturePage {
         List<Check> runtime = new ArrayList<>();
         runtime.add(Checks.expect("GraphicsEnvironment.isHeadless()", false, GraphicsEnvironment::isHeadless));
         // quarkus-desktop runs the application on a new thread named main in macOS native executables : main everywhere
+        // (the thread that starts the application : the showcase has no QuarkusApplication any more, the check keeps
+        // its name so that the runs compare with the older ones)
         runtime.add(Checks.expect("QuarkusApplication.run() thread", "main", ShowcaseMode::mainThread));
         if (Platforms.isMac()) {
             runtime.add(Checks.expect("Toolkit (macOS)", "sun.lwawt.macosx.LWCToolkit",
