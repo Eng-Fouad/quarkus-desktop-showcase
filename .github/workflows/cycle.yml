@@ -27,6 +27,11 @@ on:
         description: The showcase branch, tag or commit
         type: string
         default: main
+      showcase-path:
+        description: >-
+          The directory of the showcase in the showcase repository (samples/showcase of quarkus-desktop) ; empty : the root
+        type: string
+        default: ''
       platforms:
         description: >-
           The platforms, a JSON array of Linux-arm64, Linux-x64, Windows-x64, Windows-arm64, macOS-arm64 (empty : all five)
@@ -147,13 +152,28 @@ jobs:
         with:
           repository: ${{ inputs.showcase-repository }}
           ref: ${{ inputs.showcase-ref }}
-          path: showcase
+          path: showcase-checkout
 
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.desktop-repository }}
           ref: ${{ inputs.desktop-ref }}
           path: quarkus-desktop
+
+      # The showcase in showcase/ (the root of its repository, or showcase-path), and the scripts of this workflow in ci/ :
+      # the .github/scripts of the showcase repository, at the showcase commit when the showcase is its root
+      - name: The showcase directory
+        shell: bash
+        env:
+          SHOWCASE_PATH: ${{ inputs.showcase-path }}
+        run: mv "showcase-checkout/$SHOWCASE_PATH" showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-path == '' && inputs.showcase-repository || 'Eng-Fouad/quarkus-desktop-showcase' }}
+          ref: ${{ inputs.showcase-path == '' && inputs.showcase-ref || 'main' }}
+          path: ci
+          sparse-checkout: .github/scripts
 
       # Mounted as /root/.m2 in the container : the dependencies and the Maven wrapper distribution (saved at the end,
       # by push and scheduled runs only)
@@ -201,7 +221,7 @@ jobs:
       # The verdict and what differs, in the summary of the run and as annotations
       - name: Report
         if: always()
-        run: if [ -f showcase/.github/scripts/cycle-report.sh ]; then bash showcase/.github/scripts/cycle-report.sh; fi
+        run: if [ -f ci/.github/scripts/cycle-report.sh ]; then bash ci/.github/scripts/cycle-report.sh; fi
 
       # A build that failed downloaded only a part of the dependencies : the Maven repository is not saved then
       - name: Builds
@@ -282,13 +302,28 @@ jobs:
         with:
           repository: ${{ inputs.showcase-repository }}
           ref: ${{ inputs.showcase-ref }}
-          path: showcase
+          path: showcase-checkout
 
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.desktop-repository }}
           ref: ${{ inputs.desktop-ref }}
           path: quarkus-desktop
+
+      # The showcase in showcase/ (the root of its repository, or showcase-path), and the scripts of this workflow in ci/ :
+      # the .github/scripts of the showcase repository, at the showcase commit when the showcase is its root
+      - name: The showcase directory
+        shell: bash
+        env:
+          SHOWCASE_PATH: ${{ inputs.showcase-path }}
+        run: mv "showcase-checkout/$SHOWCASE_PATH" showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-path == '' && inputs.showcase-repository || 'Eng-Fouad/quarkus-desktop-showcase' }}
+          ref: ${{ inputs.showcase-path == '' && inputs.showcase-ref || 'main' }}
+          path: ci
+          sparse-checkout: .github/scripts
 
       # x64 : Oracle GraalVM for JDK 25, the GraalVM of the native job of quarkus-desktop and of the Windows 11 cycles
       # of the showcase (every page native = JVM)
@@ -326,7 +361,7 @@ jobs:
         shell: pwsh
         continue-on-error: true
         timeout-minutes: 5
-        run: ./showcase/.github/scripts/windows-desktop.ps1 -Prepare -Screenshot desktop-start.png
+        run: ./ci/.github/scripts/windows-desktop.ps1 -Prepare -Screenshot desktop-start.png
 
       - name: Install quarkus-desktop
         id: install
@@ -338,7 +373,7 @@ jobs:
         shell: pwsh
         continue-on-error: true
         timeout-minutes: 2
-        run: ./showcase/.github/scripts/windows-desktop.ps1 -Minimize
+        run: ./ci/.github/scripts/windows-desktop.ps1 -Minimize
 
       # -Dshowcase.activate=true : the title bar click of core/Focus also tries other points of the title bar
       - name: Cycle ${{ matrix.label }} ${{ matrix.args }}
@@ -351,11 +386,11 @@ jobs:
         shell: pwsh
         continue-on-error: true
         timeout-minutes: 5
-        run: ./showcase/.github/scripts/windows-desktop.ps1 -Screenshot desktop-end.png
+        run: ./ci/.github/scripts/windows-desktop.ps1 -Screenshot desktop-end.png
 
       - name: Report
         if: always()
-        run: if [ -f showcase/.github/scripts/cycle-report.sh ]; then bash showcase/.github/scripts/cycle-report.sh; fi
+        run: if [ -f ci/.github/scripts/cycle-report.sh ]; then bash ci/.github/scripts/cycle-report.sh; fi
 
       # A build that failed downloaded only a part of the dependencies : the Maven repository is not saved then
       - name: Builds
@@ -532,13 +567,28 @@ jobs:
         with:
           repository: ${{ inputs.showcase-repository }}
           ref: ${{ inputs.showcase-ref }}
-          path: showcase
+          path: showcase-checkout
 
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.desktop-repository }}
           ref: ${{ inputs.desktop-ref }}
           path: quarkus-desktop
+
+      # The showcase in showcase/ (the root of its repository, or showcase-path), and the scripts of this workflow in ci/ :
+      # the .github/scripts of the showcase repository, at the showcase commit when the showcase is its root
+      - name: The showcase directory
+        shell: bash
+        env:
+          SHOWCASE_PATH: ${{ inputs.showcase-path }}
+        run: mv "showcase-checkout/$SHOWCASE_PATH" showcase
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.showcase-path == '' && inputs.showcase-repository || 'Eng-Fouad/quarkus-desktop-showcase' }}
+          ref: ${{ inputs.showcase-path == '' && inputs.showcase-ref || 'main' }}
+          path: ci
+          sparse-checkout: .github/scripts
 
       # The GraalVM CE release of the macOS results of the README, pinned (setup-graalvm with java-version '25' alone gives
       # GraalVM CE 25.0.x, too old for AWT on macOS)
@@ -583,7 +633,7 @@ jobs:
       - name: Prepare the desktop
         continue-on-error: true
         timeout-minutes: 5
-        run: bash showcase/.github/scripts/macos-desktop.sh --prepare desktop-start.png
+        run: bash ci/.github/scripts/macos-desktop.sh --prepare desktop-start.png
 
       - name: Install quarkus-desktop
         id: install
@@ -606,11 +656,11 @@ jobs:
         if: always()
         continue-on-error: true
         timeout-minutes: 5
-        run: bash showcase/.github/scripts/macos-desktop.sh desktop-end.png
+        run: bash ci/.github/scripts/macos-desktop.sh desktop-end.png
 
       - name: Report
         if: always()
-        run: if [ -f showcase/.github/scripts/cycle-report.sh ]; then bash showcase/.github/scripts/cycle-report.sh; fi
+        run: if [ -f ci/.github/scripts/cycle-report.sh ]; then bash ci/.github/scripts/cycle-report.sh; fi
 
       # A build that failed downloaded only a part of the dependencies : the Maven repository is not saved then
       - name: Builds
